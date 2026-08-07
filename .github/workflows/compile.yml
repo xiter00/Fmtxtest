@@ -1,0 +1,48 @@
+name: Build ESP32-S3 Firmware
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch: # Memungkinkan kamu menjalankan workflow ini secara manual dari tab Actions
+
+jobs:
+  build:
+    name: Compile Sketch
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: 📦 Install ESP32 Core
+        run: |
+          # Menambahkan URL board manager untuk ESP32
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          # Menginstall core ESP32
+          arduino-cli core install esp32:esp32 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+      - name: 📚 Install Library FMTX (Durban77)
+        run: |
+          # Membuat folder library Arduino bawaan sistem
+          mkdir -p $HOME/Arduino/libraries
+          # Clone library FMTX dari repo durban77
+          git clone https://github.com/durban77/FMTX.git $HOME/Arduino/libraries/FMTX
+
+      - name: 🔨 Compile Sketch untuk ESP32-S3
+        run: |
+          # GANTI 'OrcaFm' di bawah ini dengan nama folder tempat file .ino kamu berada!
+          # FQBN untuk ESP32-S3 adalah esp32:esp32:esp32s3
+          arduino-cli compile --fqbn esp32:esp32:esp32s3 --output-dir ./build_output ./OrcaFm
+
+      - name: 🚀 Upload Compiled Binary (.bin)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Firmware-OrcaFM-ESP32S3
+          path: ./build_output/*.bin
+          retention-days: 7
+          
