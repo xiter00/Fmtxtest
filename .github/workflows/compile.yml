@@ -5,7 +5,7 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
-  workflow_dispatch: # Memungkinkan kamu menjalankan workflow ini secara manual dari tab Actions
+  workflow_dispatch:
 
 jobs:
   build:
@@ -21,22 +21,179 @@ jobs:
 
       - name: 📦 Install ESP32 Core
         run: |
-          # Menambahkan URL board manager untuk ESP32
           arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-          # Menginstall core ESP32
           arduino-cli core install esp32:esp32 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 
-      - name: 📚 Install Library FMTX (Durban77)
+      - name: 📚 Download & Patch Library FMTX untuk ESP32-S3
         run: |
-          # Membuat folder library Arduino bawaan sistem
-          mkdir -p $HOME/Arduino/libraries
-          # Clone library FMTX dari repo durban77
-          git clone https://github.com/durban77/FMTX.git $HOME/Arduino/libraries/FMTX
+          mkdir -p $HOME/Arduino/libraries/FMTX
+          git clone https://github.com/durban77/FMTX.git /tmp/FMTX_temp
+          
+          # 1. Membuat FMTX.h yang kompatibel dengan ESP32
+          cat << 'EOF' > $HOME/Arduino/libraries/FMTX/FMTX.h
+          #ifndef __FMTX_H
+          #define __FMTX_H
+
+          #include "Arduino.h"
+          #include <Wire.h>
+
+          #ifndef __TYPE_REDEFINE
+          #define __TYPE_REDEFINE
+          typedef uint8_t u8;
+          typedef int8_t  s8;
+          typedef uint16_t u16;
+          typedef int16_t  s16;
+          typedef uint32_t u32;
+          typedef int32_t  s32;
+          #endif
+
+          typedef enum{
+              PGA_0DB = 4,
+              PGA_4DB = 5,
+              PGA_8DB = 6,
+              PGA_12DB = 7,
+              PGA_N0DB = 0,
+              PGA_N4DB = 1,
+              PGA_N8DB = 2,
+              PGA_N12DB = 3,
+          }fmtx_pga_type;
+
+          typedef enum{
+              USA,
+              JAPAN,
+              EUROPE,
+              AUSTRALIA,
+              CHINA,
+          }country_type;
+
+          void fmtx_init(float freq, country_type country);
+          void fmtx_set_freq(float freq);
+          void fmtx_set_pga(fmtx_pga_type pga);
+          void fmtx_write_reg(u8 reg, u8 dt);
+          u8 fmtx_read_reg(u8 reg);
+
+          #endif
+          EOF
+
+          # 2. Membuat FMTX.cpp yang kompatibel dengan ESP32 (Menggunakan Wire Library)
+          cat << 'EOF' > $HOME/Arduino/libraries/FMTX/FMTX.cpp
+          #include "FMTX.h"
+
+          #define FMTX_I2C_ADDR (0x3E)
+
+          void fmtx_write_reg(u8 reg, u8 dt) {
+              Wire.beginTransmission(FMTX_I2C_ADDR);
+              Wire.write(reg);
+              Wire.write(dt);
+              Wire.endTransmission();
+          }
+
+          u8 fmtx_read_reg(u8 reg) {
+              Wire.beginTransmission(FMTX_I2C_ADDR);
+              Wire.write(reg);
+              Wire.endTransmission(false);
+              
+              Wire.requestFrom((uint8_t)FMTX_I2C_ADDR, (uint8_t)1);
+              if (Wire.available()) {
+                  return Wire.read();
+              }
+              return 0;
+          }
+
+          void fmtx_set_freq(float freq) {
+              u16 f;
+              u8 reg0, reg1_8, reg9_11;
+
+              reg0 = fmtx_read_reg(0x02);
+              reg9_11 = fmtx_read_reg(0x01);
+
+              freq *= 20;
+              f = (u16)freq;
+              f &= 0x0FFF;
+
+              if(f&0x01){
+                  reg0 |= 0x80;
+              }else{
+                  reg0 &= ~0x80;
+              }
+
+              reg1_8 = (u8)(f>>1);
+              reg9_11 = (reg9_11&0xF8) | (u8)(f>>9);
+
+              fmtx_write_reg(0x02, reg0);
+              fmtx_write_reg(0x01, reg9_11);
+              fmtx_write_reg(0x00, reg1_8);
+          }
+
+          void fmtx_set_pga(fmtx_pga_type pga) {
+              u8 reg;
+              u8 pga_val;
+              reg = fmtx_read_reg(0x01);
+              pga_val = (u8)pga;
+              pga_val &= ~0xC7;
+              reg = (reg&0xC7) | pga_val;
+              fmtx_write_reg(0x01, reg);
+          }
+
+          void fmtx_set_rfgain(u8 rfgain) {
+              u8 reg3, reg0_1, reg2;
+              reg0_1 = fmtx_read_reg(0x01);
+              reg2 = fmtx_read_reg(0x13);
+              reg3 = fmtx_read_reg(0x02);
+
+              rfgain &= 0x0F;
+              reg0_1 = (reg0_1&0x3F) | (rfgain<<6);
+              if(rfgain & 0x04){
+                  reg2 |= 0x80;
+              }else{
+                  reg2 &= ~0x80;
+              }
+              if(rfgain & 0x08){
+                  reg3 |= 0x40;
+              }else{
+                  reg3 &= ~0x40;
+              }
+              fmtx_write_reg(0x01, reg0_1);
+              fmtx_write_reg(0x13, reg2);
+              fmtx_write_reg(0x02, reg3);
+          }
+
+          void fmtx_set_phcnst(country_type country) {
+              u8 reg;
+              reg = fmtx_read_reg(0x02);
+              switch(country){
+                  case USA:
+                  case JAPAN:
+                      reg &= ~0x01;
+                      break;
+                  case EUROPE:
+                  case AUSTRALIA:
+                  case CHINA:
+                      reg |= 0x01;
+                      break;
+                  default:
+                      break;
+              }
+              fmtx_write_reg(0x02, reg);
+          }
+
+          void fmtx_set_xtal(void) {
+              u8 reg;
+              reg = fmtx_read_reg(0x1E);
+              fmtx_write_reg(0x1E, reg | 0x40);
+          }
+
+          void fmtx_init(float freq, country_type country) {
+              fmtx_set_freq(freq);
+              fmtx_set_rfgain(4);
+              fmtx_set_pga(PGA_0DB);
+              fmtx_set_phcnst(country);
+              fmtx_set_xtal();
+          }
+          EOF
 
       - name: 🔨 Compile Sketch untuk ESP32-S3
         run: |
-          # GANTI 'OrcaFm' di bawah ini dengan nama folder tempat file .ino kamu berada!
-          # FQBN untuk ESP32-S3 adalah esp32:esp32:esp32s3
           arduino-cli compile --fqbn esp32:esp32:esp32s3 --output-dir ./build_output ./OrcaFm
 
       - name: 🚀 Upload Compiled Binary (.bin)
@@ -45,4 +202,3 @@ jobs:
           name: Firmware-OrcaFM-ESP32S3
           path: ./build_output/*.bin
           retention-days: 7
-          
