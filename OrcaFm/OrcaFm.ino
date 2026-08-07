@@ -1,14 +1,21 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Wire.h>
-#include <FMTX.h> // Pastikan udah install library FMTX by Elechouse
+#include <FMTX.h> 
 
-const int SDAPIN = 8; 
-const int SCLPIN = 9;
+// --- DEKLARASI FUNGSI PGA DARI FMTX.CPP ---
+// Karena tidak ada di FMTX.h, kita deklarasikan manual di sini agar bisa dipakai
+extern "C++" {
+  void fmtx_set_pga(fmtx_pga_type pga);
+}
+
+// --- TENTUKAN PIN SDA & SCL DI SINI ---
+const int SDA_PIN = 8; // Ganti sesuai pin SDA ESP32-S3 lu
+const int SCL_PIN = 9; // Ganti sesuai pin SCL ESP32-S3 lu
 
 // Setting Hotspot ESP32
 const char* ssid = "ORCA-FM-LINK";
-const char* password = "hackerpassword"; // Minimal 8 karakter
+const char* password = "hackerpassword"; 
 
 WebServer server(80);
 
@@ -49,13 +56,12 @@ const char* htmlPage = R"rawliteral(
   <div class="box">
     <h3>TRANSMISI SUARA (MIC)</h3>
     <p style="font-size: 12px; color:#888;">Tahan tombol untuk bicara (PTT)</p>
-    <!-- Mendukung sentuhan HP dan klik Mouse -->
     <button id="ptt-btn" 
             onmousedown="talk(true)" onmouseup="talk(false)" onmouseleave="talk(false)"
             ontouchstart="talk(true); event.preventDefault();" ontouchend="talk(false); event.preventDefault();">
       [ TAHAN & BICARA ]
     </button>
-    <div class="status" id="micStatus">Status: RADIO BISU (MUTE)</div>
+    <div class="status" id="micStatus">Status: RADIO BISU (MUTED)</div>
   </div>
 
   <script>
@@ -74,12 +80,12 @@ const char* htmlPage = R"rawliteral(
         btn.classList.add('active');
         btn.innerText = "((( MENGUDARA )))";
         status.innerHTML = "<span style='color:#0f0'>Status: ON-AIR (MIC AKTIF)</span>";
-        fetch('/unmute'); // Kirim perintah unmute ke ESP32
+        fetch('/unmute'); 
       } else {
         btn.classList.remove('active');
         btn.innerText = "[ TAHAN & BICARA ]";
-        status.innerHTML = "Status: RADIO BISU (MUTE)";
-        fetch('/mute'); // Kirim perintah mute ke ESP32
+        status.innerHTML = "Status: RADIO BISU (MUTED)";
+        fetch('/mute'); 
       }
     }
   </script>
@@ -94,14 +100,17 @@ void setup() {
   Serial.println("Membuat Hotspot ORCA-FM-LINK...");
   WiFi.softAP(ssid, password);
   Serial.print("Hotspot Aktif! IP Address: ");
-  Serial.println(WiFi.softAPIP()); // Biasanya 192.168.4.1
+  Serial.println(WiFi.softAPIP()); 
 
-  // Inisialisasi FM Transmitter (Sesuaikan SDA SCL ESP32-S3 lu)
-  // Wire.begin(SDAPIN, SCLPIN); // Kalau lu pake pin custom buka comment ini
+  // Inisialisasi I2C dengan pin custom
+  Wire.begin(SDA_PIN, SCL_PIN); 
+
+  // Inisialisasi FM Transmitter
   fmtx_init(currentFreq, EUROPE); 
-  // Biar awal nyala radio langsung diam (nggak bocor suara)
-  // Cara Mute tergantung chip, untuk FMTX V2 biasanya bisa pakai perintah I2C atau diatur volume ke 0
-  fmtx_set_vol(0); 
+  
+  // Saat pertama nyalakan, set PGA ke tingkat paling rendah (-12dB) agar mic MUTE
+  fmtx_set_pga(PGA_N12DB); 
+  Serial.println("Radio Standby: Mic dalam kondisi MUTE.");
 
   // --- ROUTING WEB SERVER ---
   
@@ -121,17 +130,17 @@ void setup() {
     server.send(200, "text/plain", "OK");
   });
 
-  // 3. Endpoint Tombol Ngomong Ditekan (UNMUTE)
+  // 3. Endpoint Tombol PTT Ditekan (UNMUTE / MIC HIDUP)
   server.on("/unmute", []() {
+    fmtx_set_pga(PGA_12DB); // Naikkan gain mic maksimal (+12dB)
     Serial.println("MIC AKTIF! MANCAR...");
-    fmtx_set_vol(15); // Volume maksimal (0-15) buat mancar
     server.send(200, "text/plain", "UNMUTED");
   });
 
-  // 4. Endpoint Tombol Ngomong Dilepas (MUTE)
+  // 4. Endpoint Tombol PTT Dilepas (MUTE / MIC MATI)
   server.on("/mute", []() {
-    Serial.println("MIC MATI.");
-    fmtx_set_vol(0); // Volume 0 buat matiin mic
+    fmtx_set_pga(PGA_N12DB); // Turunkan gain mic minimal (-12dB / nyaris tak terdengar)
+    Serial.println("MIC MATI (Muted).");
     server.send(200, "text/plain", "MUTED");
   });
 
@@ -141,6 +150,5 @@ void setup() {
 }
 
 void loop() {
-  // Biarkan server dengerin request dari HP lu terus-terusan
   server.handleClient();
 }
