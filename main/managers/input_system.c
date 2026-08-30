@@ -328,6 +328,7 @@ void handleStoreInput(int btn) {
             appMode = 2;
             checkstatus = false;
       }
+      }
     }
 
     // --------------------------------------------------
