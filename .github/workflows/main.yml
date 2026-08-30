@@ -66,7 +66,7 @@ jobs:
           
           idf.py fullclean
           idf.py set-target esp32c3
-          idf.py add-dependency "espressif/cjson"
+          
           idf.py build
 
       # --- 6. UPLOAD HASIL JADI .BIN ---
