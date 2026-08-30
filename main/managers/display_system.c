@@ -13,7 +13,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "system.h"
-
+#include "server_cert.h"
 #define MAX_BINTANG 15
 
 // --- EXTERN ---
@@ -444,6 +444,7 @@ static void task_cek_produk(void *param) {
         .method = SYS_POST,
         .body = isibody,
         .content_type = "application/x-www-form-urlencoded",
+        .
     };
 
     HttpResp *res = http_request(&req);

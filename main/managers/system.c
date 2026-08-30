@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_err.h"
 #include "cJSON.h"
+#include "server_cert.h"
 
 static const char *TAG = "system";
 
@@ -93,16 +94,14 @@ static HttpResp *_do_request(
 
     // Config HTTP client
     esp_http_client_config_t config = {
-        .url            = url,
-        .event_handler  = _http_event_handler,
-        .user_data      = &ctx,
-        .method         = method,
-        .timeout_ms     = HTTP_TIMEOUT_MS,
-        .buffer_size    = 512,
-        .buffer_size_tx = 512,
-        // Kalau pakai HTTPS, tambahin:
-        // .skip_cert_common_name_check = true,
-        // .transport_type = HTTP_TRANSPORT_OVER_SSL,
+    .url            = url,
+    .event_handler  = _http_event_handler,
+    .user_data      = &ctx,
+    .method         = method,
+    .timeout_ms     = HTTP_TIMEOUT_MS,
+    .buffer_size    = 512,
+    .buffer_size_tx = 512,
+    .cert_pem       = atlanticcert, 
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);

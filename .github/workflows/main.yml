@@ -17,7 +17,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wget git flex bison gperf python3-pip python3-setuptools cmake ninja-build ccache libffi-dev libssl-dev dfu-util python3-venv
 
-          # --- 2. CEK CACHE ESP-IDF DI GUDANG (Pake RESTORE) ---
+      # --- 2. CEK CACHE ESP-IDF DI GUDANG (Pake RESTORE) ---
       - name: Restore ESP-IDF Cache
         id: cache-restore
         uses: actions/cache/restore@v4
@@ -48,25 +48,42 @@ jobs:
       - name: Patch gdbstub Source
         run: |
           python3 -c "import os,pathlib; p=pathlib.Path(os.path.expanduser('~/esp-idf'))/'components/esp_gdbstub/src/gdbstub.c'; s=p.read_text(encoding='utf-8'); s=s.replace('#if (CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME || CONFIG_ESP_GDBSTUB_SUPPORT_TASKS)', '#if 1'); p.write_text(s, encoding='utf-8')"
+
+      - name: Ambil cert & buat header
+        run: |
+          mkdir -p main/include
+          echo | openssl s_client -connect atlantich2h.com:443 -servername atlantich2h.com 2>/dev/null | openssl x509 -outform PEM > cert.pem
+
+          if [ ! -s cert.pem ]; then
+            echo "❌ Gagal ambil sertifikat, cert.pem kosong"
+            exit 1
+          fi
+
+          {
+            echo '#pragma once'
+            echo 'const char atlanticcert[] = '
+            sed 's/^/"/; s/$/\\n"/' cert.pem
+            echo ';'
+          } > main/include/server_cert.h
+
+          cat main/include/server_cert.h
+
       - name: Build Firmware
         run: |
-          # Load compiler & environment dari folder
           . ~/esp-idf/export.sh
-          
-          # Patching wifi_init
+
           python3 -c "import os; p=os.path.expanduser('~/esp-idf/components/esp_wifi/src/wifi_init.c'); \
           f=open(p,'r').read() if os.path.exists(p) else ''; \
           open(p,'w').write(f.replace('return ESP_ERR_WIFI_IF;', 'return ESP_OK;')) if f else print('File not found')"
-          
+
           echo "Patch Selesai, Lanjut Build..."
 
           if [ -f sdkconfig.defaults ]; then
             cp sdkconfig.defaults sdkconfig
           fi
-          
+
           idf.py fullclean
           idf.py set-target esp32c3
-          
           idf.py build
 
       # --- 6. UPLOAD HASIL JADI .BIN ---
@@ -77,4 +94,3 @@ jobs:
           path: |
             build/*.bin
             build/*/*.bin
-        
