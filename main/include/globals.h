@@ -79,4 +79,8 @@ extern int  kecerahan;
 extern int bintangX[5];
 extern int bintangY[5];
 
+// -- SYSTEM API
+extern bool itemtersedia;
+extern bool checkstatus;
+extern const char* apiKeyH2H;
 #endif // GLOBALS_H

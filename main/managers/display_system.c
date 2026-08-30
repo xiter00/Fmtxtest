@@ -4,12 +4,14 @@
 #include "freertos/task.h"
 #include "esp_timer.h"
 #include "globals.h"
+#include "wifi_sys.h"
 #include "photo_data.h"
 #include "ssd1306.h"
 #include "i2c.h"
 #include <math.h>
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "system.h"
 
 #define MAX_BINTANG 15
 
@@ -191,9 +193,9 @@ static const char *katHeader[] = {
 static const char *subGem[]   = {"Mobile Legends", "Free Fire", "PUBG Mobile", "Genshin Impact"};
 static const char *subPulsa[] = {"Telkomsel", "XL Axiata", "Indosat", "Tri"};
 static const char *subMoney[] = {"DANA", "GoPay", "OVO", "ShopeePay"};
-static const char *subSet[]   = {"Brightness", "About", "Reboot"};
+static const char *subSet[]   = {"Brightness", "About", "Reboot", "WiFi"};
 
-const int totalSubKat[] = {4, 4, 4, 3};  // Diakses dari input_system
+const int totalSubKat[] = {4, 4, 4, 4};  // Diakses dari input_system
 
 static const unsigned char *ikonGem[]   = {iconSmall_scan, iconSmall_wifi, iconSmall_sniff, iconSmall_spam};
 static const unsigned char *ikonPulsa[] = {iconSmall_apple, iconSmall_android, iconSmall_conn, iconSmall_scan};
@@ -461,7 +463,7 @@ void tampilkanStore() {
             formatHarga(p->harga, hBuf, sizeof(hBuf));
             ssd1306_draw_string_adafruit(0, 84, y+1, hBuf, tc, bc);
         }
-        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
         ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
         ssd1306_draw_string_adafruit(0, 104, 56, "[OK]",   BLACK, WHITE);
     }
@@ -472,13 +474,46 @@ void tampilkanStore() {
     // ======================================================
     else if (appMode == 3) {
         const StoreProduk *p = storeGetItem(katKursor, subKursor, itemDipilih);
+        
+        
+        char isibody[200];
+        snprintf(isibody, sizeof(isibody), "api_key=%s&type=prabayar&code=%s", apiKeyH2H, p->kode);
+        
+ if (checkstatus == false) {
+ ssd1306_draw_string_adafruit(0, 16, 28, "Checking Product", WHITE, BLACK);
+HttpReq req = {
+    .url = "https://atlantich2h.com/layanan/price_list",
+    .method = SYS_POST,
+    .body = isibody,
+    .content_type = "application/x-www-form-urlencoded",
+};
 
-        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
+// Eksekusi request-nya
+HttpResp *res = http_request(&req);
+
+if (res && res->ok) {
+    const char* tersedia = resp_str(res, "status");
+    if (tersedia != NULL && strcmp(tersedia, "available") == 0) {
+    itemtersedia = true;
+   } else {
+        itemtersedia = false;
+        
+        }
+        
+}
+fetch_free(res);
+
+checkstatus = true;
+}
+
+if (itemtersedia == true) {
+    ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 22, 1, "DETAIL PRODUK", BLACK, WHITE);
 
         scrollTeks(p->nama, tmp, 20, true);
         ssd1306_draw_string_adafruit(0, 5, 14, "Produk:", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 5, 24, tmp,       WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 75, 14, "tersedia", WHITE, BLACK);
 
         char hBuf[14];
         formatHarga(p->harga, hBuf, sizeof(hBuf));
@@ -486,10 +521,16 @@ void tampilkanStore() {
         ssd1306_draw_string_adafruit(0, 5, 34, "Harga:", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 5, 44, buf,      WHITE, BLACK);
 
-        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
         ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
         ssd1306_draw_string_adafruit(0, 92, 56, "[BELI]", BLACK, WHITE);
-    }
+} else {
+ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", WHITE, BLACK);
+        }
+
+
+            }
 
     // ======================================================
     // LAYAR 4: INPUT FIELD LIST
@@ -532,7 +573,7 @@ void tampilkanStore() {
                     ssd1306_draw_string_adafruit(0, 16, y+3, kl, WHITE, BLACK);
             }
         }
-        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
         ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
         ssd1306_draw_string_adafruit(0, 92, 56, "[EDIT]", BLACK, WHITE);
     }
@@ -551,9 +592,9 @@ void tampilkanStore() {
     else if (appMode == 5) {
         // Pilih charset sesuai mode
         static const char CS_ANGKA[] = "0123456789";
-        static const char CS_HURUF[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@ _-.";
+        static const char CS_HURUF[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@ _-.#";
         const char *cs    = inputAngka ? CS_ANGKA : CS_HURUF;
-        int         csLen = inputAngka ? 10 : 58;
+        int         csLen = inputAngka ? 10 : 59;
         int         ci    = charIdx % csLen; // Safety clamp
 
         // Header: nama field
@@ -573,12 +614,12 @@ void tampilkanStore() {
             ssd1306_fill_rectangle(0, 2, 23, 33, 10, WHITE);
             ssd1306_draw_string_adafruit(0, 4, 24, "ANGKA", BLACK, WHITE);
             ssd1306_draw_rectangle(0, 38, 23, 33, 10, WHITE);
-            ssd1306_draw_string_adafruit(0, 36, 24, "HURUF", WHITE, BLACK);
+            ssd1306_draw_string_adafruit(0, 39, 24, "HURUF", WHITE, BLACK);
         } else {
             ssd1306_draw_rectangle(0, 2, 23, 33, 10, WHITE);
             ssd1306_draw_string_adafruit(0, 4, 24, "ANGKA", WHITE, BLACK);
             ssd1306_fill_rectangle(0, 38, 23, 33, 10, WHITE);
-            ssd1306_draw_string_adafruit(0, 36, 24, "HURUF", BLACK, WHITE);
+            ssd1306_draw_string_adafruit(0, 39, 24, "HURUF", BLACK, WHITE);
         }
 
         // Kotak karakter aktif (tengah-kanan)
@@ -628,7 +669,7 @@ void tampilkanStore() {
             ssd1306_draw_string_adafruit(0, 2+lw, yLine, tmp, WHITE, BLACK);
         }
 
-        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
         ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
         ssd1306_draw_string_adafruit(0, 104, 56, "[OK]",   BLACK, WHITE);
     }
@@ -659,7 +700,7 @@ void tampilkanStore() {
                 ssd1306_draw_string_adafruit(0, 46, yP+1, (char*)menuP[i], WHITE, BLACK);
             }
         }
-        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
         ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
         ssd1306_draw_string_adafruit(0, 104, 56, "[OK]",   BLACK, WHITE);
     }
@@ -689,8 +730,8 @@ void tampilkanStore() {
         ssd1306_draw_string_adafruit(0, 61, 34, tmp, WHITE, BLACK);
 
         
-        ssd1306_draw_string_adafruit(0, 2,  57, "< BACK",   WHITE, BLACK);
-        ssd1306_draw_string_adafruit(0, 61, 57, "SCAN&PAY", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 91, 57, "< BACK",   WHITE, BLACK);
+        
     }
 
     // ======================================================
@@ -724,7 +765,7 @@ void tampilkanStore() {
         ssd1306_draw_string_adafruit(0, 37, 45, p->kode, WHITE, BLACK);
 
         // Footer
-        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
         ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
     }
 
@@ -757,7 +798,7 @@ void tampilkanStore() {
 
         ssd1306_draw_string_adafruit(0,37, 45, "Coba lagi!", WHITE, BLACK);
 
-        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
         ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
     }
 
@@ -767,6 +808,114 @@ void tampilkanStore() {
 // ==========================================================
 // BRIGHTNESS
 // ==========================================================
+    // ======================================================
+    // LAYAR 13: WiFi List (hasil scan)
+    // ======================================================
+    else if (appMode == 13) {
+        ssd1306_clear(0);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 1, "Jaringan WiFi", BLACK, WHITE);
+
+        if (wifiStatus == WIFI_STATUS_SCANNING) {
+            ssd1306_draw_string_adafruit(0, 10, 28, "Scanning...", WHITE, BLACK);
+        } else if (wifiTotal == 0) {
+            ssd1306_draw_string_adafruit(0, 10, 20, "Tidak ada", WHITE, BLACK);
+            ssd1306_draw_string_adafruit(0, 10, 34, "jaringan.", WHITE, BLACK);
+            ssd1306_draw_string_adafruit(0, 0, 54, "< Kembali", WHITE, BLACK);
+        } else {
+            for (int i = 0; i < 3; i++) {
+                int idx = wifiScroll + i;
+                if (idx >= wifiTotal) break;
+                int y = 12 + i * 17;
+                if (idx == wifiKursor) ssd1306_fill_rectangle(0, 0, y-1, 128, 15, WHITE);
+                char baris[33];
+                snprintf(baris, sizeof(baris), "%s%s",
+                    wifiList[idx].has_pass ? "[*]" : "[O]",
+                    wifiList[idx].ssid);
+                ssd1306_draw_string_adafruit(0, 2, y+1, baris,
+                    (idx == wifiKursor) ? BLACK : WHITE,
+                    (idx == wifiKursor) ? WHITE : BLACK);
+            }
+            ssd1306_draw_string_adafruit(0, 0, 56, "< Batal  OK Pilih", WHITE, BLACK);
+        }
+        ssd1306_refresh(0, true);
+    }
+
+    // ======================================================
+    // LAYAR 14: Input Password WiFi (keyboard)
+    // ======================================================
+    else if (appMode == 14) {
+        static const char CS_WIFI[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@ _-.#!";
+        int csLen14 = 69;
+        int ci14    = charIdx % csLen14;
+
+        ssd1306_clear(0);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 1, "Password WiFi:", BLACK, WHITE);
+
+        // Preview password (masking)
+        char masked[65] = {0};
+        int pl = strlen(wifiPassBuf);
+        for (int m = 0; m < pl && m < 21; m++) masked[m] = '*';
+        if (pl < 64) strcat(masked, "_");
+        ssd1306_draw_string_adafruit(0, 2, 12, masked, WHITE, BLACK);
+        ssd1306_draw_hline(0, 0, 21, 128, WHITE);
+
+        // Kotak karakter
+        ssd1306_fill_rectangle(0, 91, 22, 20, 20, WHITE);
+        char csShow[2] = { CS_WIFI[ci14], '\0' };
+        ssd1306_draw_string_adafruit(0, 98, 30, csShow, BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 82, 28, "<", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 114, 28, ">", WHITE, BLACK);
+
+        char posStr[10];
+        snprintf(posStr, sizeof(posStr), "%d/%d", ci14+1, csLen14);
+        ssd1306_draw_string_adafruit(0, 90, 47, posStr, WHITE, BLACK);
+
+        ssd1306_draw_string_adafruit(0, 0, 56, "OK=Tambah 2xOK=Selesai", WHITE, BLACK);
+        ssd1306_refresh(0, true);
+    }
+
+    // ======================================================
+    // LAYAR 15: Connecting WiFi
+    // ======================================================
+    else if (appMode == 15) {
+        ssd1306_clear(0);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 1, "Menghubungkan...", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 4, 18, wifiList[wifiKursor].ssid, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 10, 40, "Mohon tunggu...", WHITE, BLACK);
+        ssd1306_refresh(0, true);
+    }
+
+    // ======================================================
+    // LAYAR 16: WiFi Terhubung
+    // ======================================================
+    else if (appMode == 16) {
+        ssd1306_clear(0);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 1, "WiFi Terhubung!", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 4, 14, wifiConnectedSSID, WHITE, BLACK);
+        const char *ip = wifi_get_ip();
+        ssd1306_draw_string_adafruit(0, 4, 30, ip ? ip : "-", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 0, 54, "< Kembali", WHITE, BLACK);
+        ssd1306_refresh(0, true);
+    }
+
+    // ======================================================
+    // LAYAR 17: WiFi Gagal
+    // ======================================================
+    else if (appMode == 17) {
+        ssd1306_clear(0);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 1, "Gagal Konek!", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 10, 18, wifiList[wifiKursor].ssid, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 4, 34, "Salah password?", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 0, 54, "< Coba lagi", WHITE, BLACK);
+        ssd1306_refresh(0, true);
+    }
+    
+
 void tampilkanBrightness() {
     ssd1306_clear(0);
     char buf[16];
@@ -781,7 +930,7 @@ void tampilkanBrightness() {
     snprintf(buf, sizeof(buf), "%d%%", (int)map(kecerahan, 0, 255, 0, 100));
     ssd1306_draw_string_adafruit(0, 55, 45, buf, WHITE, BLACK);
 
-    ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+    ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
     ssd1306_draw_string_adafruit(0, 2, 56, "[<]BACK",    BLACK, WHITE);
     ssd1306_draw_string_adafruit(0, 62, 56, "[>]+[OK]-",  BLACK, WHITE);
     ssd1306_refresh(0, true);

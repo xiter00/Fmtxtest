@@ -4,6 +4,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "globals.h"
+#include "wifi_sys.h"
 #include "photo_data.h"
 
 extern void task_display(void *pvParameters);
@@ -41,7 +42,13 @@ StoreField field[4]   = {0};
 char      targetID[64]= {0};
 bool      inputAngka  = true;   // Default: mode angka (0-9)
 
+// -- SYSTEM API --
+bool itemtersedia = false;
+bool checkstatus = false;
+const char* apiKeyH2H = "n69ZrluCowPuGGnJ9nP8cQHlHAp21WHGKE1O66eHz3BVEUYbwPPmXgLevypIOLsNezoC3vsLo5IOCkKsPFKs5tUCA1t4TjYiiU3f";
+
 void app_main(void) {
     ESP_LOGI("JirStore", "Booting...");
+    wifi_init();
     xTaskCreate(task_display, "Display", 8192, NULL, 1, NULL);
 }

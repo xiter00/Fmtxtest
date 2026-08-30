@@ -6,6 +6,7 @@
 #include "esp_system.h"
 #include "driver/gpio.h"
 #include "globals.h"
+#include "wifi_sys.h"
 
 // --- Extern dari display_system.c ---
 extern int storeGetTotal(int kat, int sub);
@@ -52,11 +53,13 @@ void handleJoystick() {
     // ---- LAYAR 5: AUTO-REPEAT RIGHT + debounce terpisah OK/LEFT ----
     // Tahan RIGHT → cycling makin cepat (600ms=100ms/step, 1200ms=50ms/step)
     // OK/LEFT punya debounce sendiri supaya auto-repeat tidak ganggu
-    if (appMode == 5) {
+if (appMode == 5) {
         static uint32_t tHold   = 0;
         static bool     hold    = false;
         static uint32_t tRep    = 0;
-        static uint32_t lastOL  = 0;  // Debounce khusus OK & LEFT
+        static uint32_t lastOL  = 0;  // Debounce noise OK & LEFT
+        static bool     oPrev   = false;  // status OK frame sebelumnya
+        static bool     lPrev   = false;  // status LEFT frame sebelumnya
 
         bool rDown = (gpio_get_level(PIN_RIGHT) == 0);
         bool lDown = (gpio_get_level(PIN_LEFT)  == 0);
@@ -82,12 +85,18 @@ void handleJoystick() {
             hold = false;
         }
 
-        // --- OK / LEFT: debounce terpisah 150ms ---
-        if (!lDown && !oDown) return;
-        if (now - lastOL < 150) return;
+        // --- OK / LEFT: hanya trigger sekali per penekanan (rising edge) ---
+        bool oPressed = oDown && !oPrev;
+        bool lPressed = lDown && !lPrev;
+        oPrev = oDown;
+        lPrev = lDown;
+
+        if (!oPressed && !lPressed) return;
+        if (now - lastOL < 150) return;  // redam noise mekanik
         lastOL = now;
-        if      (lDown) handleStoreInput(BTN_LEFT);
-        else if (oDown) handleStoreInput(BTN_OK);
+
+        if      (lPressed) handleStoreInput(BTN_LEFT);
+        else if (oPressed) handleStoreInput(BTN_OK);
         return;
     }
 
@@ -118,7 +127,6 @@ void handleJoystick() {
         }
         return;
     }
-
     // ---- ABOUT (layar 7) ----
     if (appMode == 7) {
         if (btn == BTN_LEFT) { appMode=0; diSubMenu=true; katKursor=3; subKursor=1; }
@@ -129,6 +137,99 @@ void handleJoystick() {
     if (appMode == 8) {
         if      (btn == BTN_LEFT) { appMode=0; diSubMenu=true; katKursor=3; subKursor=2; }
         else if (btn == BTN_OK)   { esp_restart(); }
+        return;
+    }
+
+
+    // ---- WIFI LIST (mode 13) ----
+    if (appMode == 13) {
+        if (wifiStatus == WIFI_STATUS_SCANNING) return;
+        if (btn == BTN_LEFT) {
+            if (wifiKursor > 0) {
+                wifiKursor--;
+                if (wifiKursor < wifiScroll) wifiScroll--;
+            } else {
+                appMode = 0; diSubMenu = true; katKursor = 3; subKursor = 3;
+            }
+        } else if (btn == BTN_RIGHT) {
+            if (wifiKursor < wifiTotal - 1) {
+                wifiKursor++;
+                if (wifiKursor >= wifiScroll + 3) wifiScroll++;
+            }
+        } else if (btn == BTN_OK && wifiTotal > 0) {
+            if (wifiList[wifiKursor].has_pass) {
+                memset(wifiPassBuf, 0, sizeof(wifiPassBuf));
+                charIdx = 0;
+                appMode = 14;
+            } else {
+                wifiPassBuf[0] = '\0';
+                wifi_connect_selected();
+                appMode = 15;
+            }
+        }
+        return;
+    }
+
+    // ---- WIFI PASSWORD (mode 14) — keyboard khusus WiFi ----
+    if (appMode == 14) {
+        static const char CS_WIFI[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@ _-.#!";
+        int csWLen = 69;
+        static uint32_t tOK14 = 0, tL14 = 0;
+
+        if (btn == BTN_RIGHT) {
+            charIdx = (charIdx + 1) % csWLen;
+        } else if (btn == BTN_OK) {
+            bool dbl = (now - tOK14 < 400) && tOK14;
+            tOK14 = now;
+            if (dbl) {
+                wifi_connect_selected();
+                charIdx = 0;
+                appMode = 15;
+            } else {
+                int l = strlen(wifiPassBuf);
+                if (l < 63) {
+                    wifiPassBuf[l]   = CS_WIFI[charIdx % csWLen];
+                    wifiPassBuf[l+1] = '\0';
+                    charIdx = 0;
+                }
+            }
+        } else if (btn == BTN_LEFT) {
+            bool dbl = (now - tL14 < 400) && tL14;
+            tL14 = now;
+            if (dbl) {
+                memset(wifiPassBuf, 0, sizeof(wifiPassBuf));
+                charIdx = 0;
+                appMode = 13;
+            } else {
+                int l = strlen(wifiPassBuf);
+                if (l > 0) wifiPassBuf[l-1] = '\0';
+            }
+        }
+        return;
+    }
+
+    // ---- CONNECTING (mode 15) — auto-transition, cek status ----
+    if (appMode == 15) {
+        if (wifiStatus == WIFI_STATUS_CONNECTED) appMode = 16;
+        if (wifiStatus == WIFI_STATUS_FAILED)    appMode = 17;
+        return;
+    }
+
+    // ---- WIFI SUKSES (mode 16) ----
+    if (appMode == 16) {
+        if (btn == BTN_LEFT) {
+            appMode = 0; diSubMenu = true; katKursor = 3; subKursor = 3;
+        }
+        return;
+    }
+
+    // ---- WIFI GAGAL (mode 17) ----
+    if (appMode == 17) {
+        if (btn == BTN_LEFT) {
+            // Balik ke list, scan ulang
+            wifi_scan_start();
+            appMode = 13;
+        }
         return;
     }
 
@@ -164,6 +265,7 @@ void handleJoystick() {
                     if      (subKursor == 0) appMode = 1;
                     else if (subKursor == 1) appMode = 7;
                     else if (subKursor == 2) appMode = 8;
+                    else if (subKursor == 3) { wifi_scan_start(); appMode = 13; }
                 } else {
                     // Toko → ke daftar item
                     itemKursor = 0; itemScroll = 0;
@@ -210,13 +312,22 @@ void handleStoreInput(int btn) {
     // < kembali | OK beli → setup field → layar 4
     // --------------------------------------------------
     else if (appMode == 3) {
+     if (itemtersedia == true) {
         if (btn == BTN_LEFT) {
             appMode = 2;
+            checkstatus = false;
         } else if (btn == BTN_OK) {
             storeSetupField(katKursor, subKursor);
             fieldKursor = 0; charIdx = 0;
             appMode = 4;
+            checkstatus = false;
         }
+      }
+      else {
+         if (btn == BTN_LEFT) {
+            appMode = 2;
+            checkstatus = false;
+      }
     }
 
     // --------------------------------------------------
@@ -260,9 +371,9 @@ void handleStoreInput(int btn) {
     // --------------------------------------------------
     else if (appMode == 5) {
         static const char CS_ANGKA[] = "0123456789";
-        static const char CS_HURUF[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz _-.";
+        static const char CS_HURUF[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@ _-.#";
         const char *cs    = inputAngka ? CS_ANGKA : CS_HURUF;
-        int         csLen = inputAngka ? 10 : 58;
+        int         csLen = inputAngka ? 10 : 59;
 
         if (btn == BTN_RIGHT) {
             charIdx = (charIdx + 1) % csLen;
@@ -354,7 +465,7 @@ void handleStoreInput(int btn) {
             subKursor = 0; atasMenu = 0;
         }
         else if (btn == BTN_RIGHT) {
-            appMode = 11;
+            appMode = 12;
         }
     }
 
@@ -363,14 +474,14 @@ void handleStoreInput(int btn) {
     // LAYAR 12: TRX GAGAL
     // < kembali ke home (menu utama)
     // --------------------------------------------------
-    else if (appMode == 11 || appMode == 12) {
+    else if (appMode == 12) {
         if (btn == BTN_LEFT) {
             appMode = 0; diSubMenu = false;
             katKursor = katIdx = 0;
             subKursor = 0; atasMenu = 0;
         }
         else if (btn == BTN_RIGHT) {
-            appMode = 12;
+            appMode = 11;
         }
     }
 }
