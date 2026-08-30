@@ -706,7 +706,7 @@ void tampilkanStore() {
         ssd1306_draw_string_adafruit(0, 14, 1, "TRX BERHASIL", BLACK, WHITE);
 
         // Ikon centang 32x32 di pojok kiri-bawah area konten
-        oled_draw_bitmap(0,0,21,icon_centang_32,32,32,WHITE)
+        oled_draw_bitmap(0,0,21,icon_centang_32,32,32,WHITE);
         
 
         // Panel kanan (x=35)
@@ -740,7 +740,7 @@ void tampilkanStore() {
         ssd1306_draw_string_adafruit(0, 22, 1, "TRX GAGAL", BLACK, WHITE);
 
         // Ikon silang 32x32 pojok kiri-bawah
-        oled_draw_bitmap(0,0,21,icon_silang_32,32,32,WHITE)
+        oled_draw_bitmap(0,0,21,icon_silang_32,32,32,WHITE);
         
 
         // Panel kanan (x=35)
