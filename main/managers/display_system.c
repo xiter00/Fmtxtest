@@ -206,23 +206,23 @@ static const unsigned char *ikonSet[]   = {iconSmall_bright, iconSmall_info, ico
 // DATA PRODUK
 // ==========================================================
 static const StoreProduk itemML[] = {
-    {"5 Diamond",    "ML005",   1500}, {"11 Diamond",   "ML011",   3000},
-    {"22 Diamond",   "ML022",   6000}, {"56 Diamond",   "ML056",  14000},
-    {"86 Diamond",   "ML086",  22000}, {"172 Diamond",  "ML172",  44000},
+    {"5 Diamond",    "ML5",   1500}, {"11 Diamond",   "ML11",   3000},
+    {"22 Diamond",   "ML22",   6000}, {"56 Diamond",   "ML56",  14000},
+    {"86 Diamond",   "ML86",  22000}, {"172 Diamond",  "ML172",  44000},
     {"257 Diamond",  "ML257",  65000}, {"514 Diamond",  "ML514", 128000},
 };
 static const StoreProduk itemFF[] = {
-    {"5 Diamond",    "FF005",   1500}, {"70 Diamond",   "FF070",  10500},
+    {"5 Diamond",    "FF5",   1500}, {"70 Diamond",   "FF070",  10500},
     {"140 Diamond",  "FF140",  21000}, {"355 Diamond",  "FF355",  52000},
     {"720 Diamond",  "FF720", 104000}, {"1450 Diamond", "FF1450",205000},
 };
 static const StoreProduk itemPUBG[] = {
-    {"60 UC",  "PUBG060",  14000}, {"120 UC",  "PUBG120",  28000},
+    {"60 UC",  "PUBG60",  14000}, {"120 UC",  "PUBG120",  28000},
     {"325 UC", "PUBG325",  75000}, {"660 UC",  "PUBG660", 150000},
     {"1800 UC","PUBG1800",400000},
 };
 static const StoreProduk itemGI[] = {
-    {"60 Primogem",   "GI060",  14000}, {"300+30 Primo",  "GI300",  75000},
+    {"60 Primogem",   "GI60",  14000}, {"300+30 Primo",  "GI300",  75000},
     {"980+110 Primo", "GI980", 210000}, {"1980+260 Primo","GI1980",420000},
 };
 static const int           totDiamond[] = {8, 6, 5, 4};
