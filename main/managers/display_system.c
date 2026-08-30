@@ -182,10 +182,10 @@ void scrollTeks(const char *src, char *out, int maxChar, bool aktif) {
 // DATA MENU
 // ==========================================================
 static const char *katHeader[] = {
-    "#> JirStore: GEM",
-    "#> JirStore: HP ",
-    "#> JirStore: $$$ ",
-    "#> JirStore: SET"
+    "#> Game",
+    "#> Pulsa ",
+    "#> E-Money ",
+    "#> Setting"
 };
 
 static const char *subGem[]   = {"Mobile Legends", "Free Fire", "PUBG Mobile", "Genshin Impact"};
@@ -328,16 +328,16 @@ void storeSetupField(int kat, int sub) {
     TipeField t = configField[kat][sub];
     switch (t) {
         case F_HP:
-            strcpy(field[0].label, "Nomor HP"); totalField = 1; break;
+            strcpy(field[0].label, "NomorHP"); totalField = 1; break;
         case F_ID:
-            strcpy(field[0].label, "User ID");  totalField = 1; break;
+            strcpy(field[0].label, "UserID");  totalField = 1; break;
         case F_ID_ZONE:
-            strcpy(field[0].label, "User ID");
-            strcpy(field[1].label, "Zone ID");  totalField = 2; break;
+            strcpy(field[0].label, "UserID");
+            strcpy(field[1].label, "ZoneID");  totalField = 2; break;
         case F_EMAIL:
             strcpy(field[0].label, "Email");    totalField = 1; break;
         case F_ID_MAIL:
-            strcpy(field[0].label, "User ID");
+            strcpy(field[0].label, "UserID");
             strcpy(field[1].label, "Email");    totalField = 2; break;
     }
 }
@@ -434,7 +434,7 @@ void tampilkanStore() {
     // > geser bawah | < kembali | OK pilih
     // ======================================================
     if (appMode == 2) {
-        ssd1306_fill_rectangle(0, 0, 0, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         const char *subName =
             (katKursor==0) ? subGem[subKursor] :
             (katKursor==1) ? subPulsa[subKursor] : subMoney[subKursor];
@@ -461,9 +461,9 @@ void tampilkanStore() {
             formatHarga(p->harga, hBuf, sizeof(hBuf));
             ssd1306_draw_string_adafruit(0, 84, y+1, hBuf, tc, bc);
         }
-        ssd1306_fill_rectangle(0, 0, 54, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2,   55, "< BACK", BLACK, WHITE);
-        ssd1306_draw_string_adafruit(0, 104, 55, "[OK]",   BLACK, WHITE);
+        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 104, 56, "[OK]",   BLACK, WHITE);
     }
 
     // ======================================================
@@ -473,7 +473,7 @@ void tampilkanStore() {
     else if (appMode == 3) {
         const StoreProduk *p = storeGetItem(katKursor, subKursor, itemDipilih);
 
-        ssd1306_fill_rectangle(0, 0, 0, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 22, 1, "DETAIL PRODUK", BLACK, WHITE);
 
         scrollTeks(p->nama, tmp, 20, true);
@@ -483,12 +483,12 @@ void tampilkanStore() {
         char hBuf[14];
         formatHarga(p->harga, hBuf, sizeof(hBuf));
         snprintf(buf, sizeof(buf), "Rp %s", hBuf);
-        ssd1306_draw_string_adafruit(0, 5, 36, "Harga:", WHITE, BLACK);
-        ssd1306_draw_string_adafruit(0, 5, 46, buf,      WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 5, 34, "Harga:", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 5, 44, buf,      WHITE, BLACK);
 
-        ssd1306_fill_rectangle(0, 0, 54, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2,  55, "< BACK", BLACK, WHITE);
-        ssd1306_draw_string_adafruit(0, 92, 55, "[BELI]", BLACK, WHITE);
+        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 92, 56, "[BELI]", BLACK, WHITE);
     }
 
     // ======================================================
@@ -496,7 +496,7 @@ void tampilkanStore() {
     // > ganti field | < kembali | OK edit / konfirmasi
     // ======================================================
     else if (appMode == 4) {
-        ssd1306_fill_rectangle(0, 0, 0, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 12, 1, "DATA PEMBELIAN", BLACK, WHITE);
 
         bool semuaIsi = true;
@@ -525,16 +525,16 @@ void tampilkanStore() {
                 ssd1306_draw_string_adafruit(0, 73, y, tmp, tc, bc);
             } else {
                 // Baris tombol KONFIRMASI
-                const char *kl = semuaIsi ? "[KONFIRMASI]" : "[ISI DULU!] ";
+                const char *kl = semuaIsi ? "[]> KONFIRMASI" : "[]> ISI DULU! ";
                 if (ak)
-                    ssd1306_draw_string_adafruit(0, 16, y, kl, BLACK, WHITE);
+                    ssd1306_draw_string_adafruit(0, 16, y+3, kl, BLACK, WHITE);
                 else
-                    ssd1306_draw_string_adafruit(0, 16, y, kl, WHITE, BLACK);
+                    ssd1306_draw_string_adafruit(0, 16, y+3, kl, WHITE, BLACK);
             }
         }
-        ssd1306_fill_rectangle(0, 0, 54, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2,   55, "< BACK", BLACK, WHITE);
-        ssd1306_draw_string_adafruit(0, 92,  55, "[EDIT]", BLACK, WHITE);
+        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 92, 56, "[EDIT]", BLACK, WHITE);
     }
 
     // ======================================================
@@ -557,7 +557,7 @@ void tampilkanStore() {
         int         ci    = charIdx % csLen; // Safety clamp
 
         // Header: nama field
-        ssd1306_fill_rectangle(0, 0, 0, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         snprintf(buf, sizeof(buf), "INPUT: %s", field[fieldKursor].label);
         ssd1306_draw_string_adafruit(0, 2, 1, buf, BLACK, WHITE);
 
@@ -570,29 +570,29 @@ void tampilkanStore() {
 
         // Badge MODE (kiri) — putih = aktif, outline = tidak
         if (inputAngka) {
-            ssd1306_fill_rectangle(0, 2, 23, 30, 10, WHITE);
+            ssd1306_fill_rectangle(0, 2, 23, 33, 10, WHITE);
             ssd1306_draw_string_adafruit(0, 4, 24, "ANGKA", BLACK, WHITE);
-            ssd1306_draw_rectangle(0, 34, 23, 30, 10, WHITE);
+            ssd1306_draw_rectangle(0, 38, 23, 33, 10, WHITE);
             ssd1306_draw_string_adafruit(0, 36, 24, "HURUF", WHITE, BLACK);
         } else {
-            ssd1306_draw_rectangle(0, 2, 23, 30, 10, WHITE);
+            ssd1306_draw_rectangle(0, 2, 23, 33, 10, WHITE);
             ssd1306_draw_string_adafruit(0, 4, 24, "ANGKA", WHITE, BLACK);
-            ssd1306_fill_rectangle(0, 34, 23, 30, 10, WHITE);
+            ssd1306_fill_rectangle(0, 38, 23, 33, 10, WHITE);
             ssd1306_draw_string_adafruit(0, 36, 24, "HURUF", BLACK, WHITE);
         }
 
         // Kotak karakter aktif (tengah-kanan)
-        ssd1306_fill_rectangle(0, 82, 22, 20, 20, WHITE);
+        ssd1306_fill_rectangle(0, 91, 22, 20, 20, WHITE);
         char csShow[2] = { cs[ci], '\0' };
-        ssd1306_draw_string_adafruit(0, 89, 28, csShow, BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 98, 30, csShow, BLACK, WHITE);
 
         // Panah kiri-kanan
-        ssd1306_draw_string_adafruit(0, 68, 28, "<", WHITE, BLACK);
-        ssd1306_draw_string_adafruit(0, 106, 28, ">", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 82, 28, "<", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 114, 28, ">", WHITE, BLACK);
 
         // Posisi karakter (kanan atas)
         snprintf(buf, sizeof(buf), "%d/%d", ci+1, csLen);
-        ssd1306_draw_string_adafruit(0, 82, 23, buf, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 90, 47, buf, WHITE, BLACK);
 
         
 }
@@ -604,7 +604,7 @@ void tampilkanStore() {
     else if (appMode == 6) {
         const StoreProduk *p = storeGetItem(katKursor, subKursor, itemDipilih);
 
-        ssd1306_fill_rectangle(0, 0, 0, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 28, 1, "KONFIRMASI", BLACK, WHITE);
 
         // Nama produk scroll
@@ -628,9 +628,9 @@ void tampilkanStore() {
             ssd1306_draw_string_adafruit(0, 2+lw, yLine, tmp, WHITE, BLACK);
         }
 
-        ssd1306_fill_rectangle(0, 0, 54, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2,   55, "< BACK", BLACK, WHITE);
-        ssd1306_draw_string_adafruit(0, 104, 55, "[OK]",   BLACK, WHITE);
+        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 104, 56, "[OK]",   BLACK, WHITE);
     }
 
     // ======================================================
@@ -638,7 +638,7 @@ void tampilkanStore() {
     // > toggle | < kembali | OK eksekusi
     // ======================================================
     else if (appMode == 9) {
-        ssd1306_fill_rectangle(0, 0, 0, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 12, 1, "PILIH PEMBAYARAN", BLACK, WHITE);
         ssd1306_fill_rectangle(0, 0, 24, 128, 16, WHITE);
 
@@ -659,9 +659,9 @@ void tampilkanStore() {
                 ssd1306_draw_string_adafruit(0, 46, yP+1, (char*)menuP[i], WHITE, BLACK);
             }
         }
-        ssd1306_fill_rectangle(0, 0, 54, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2,   55, "< BACK", BLACK, WHITE);
-        ssd1306_draw_string_adafruit(0, 104, 55, "[OK]",   BLACK, WHITE);
+        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 104, 56, "[OK]",   BLACK, WHITE);
     }
 
     // ======================================================
@@ -673,7 +673,7 @@ void tampilkanStore() {
         const StoreProduk *p = storeGetItem(katKursor, subKursor, itemDipilih);
 
         oled_draw_bitmap(0, 0, 0, qrisku, 58, 58, WHITE);
-        ssd1306_draw_vline(0, 59, 0, 57, WHITE);
+      
 
         char hBuf[14];
         formatHarga(p->harga, hBuf, sizeof(hBuf));
@@ -688,9 +688,9 @@ void tampilkanStore() {
         scrollTeks(targetID, tmp, 11, true);
         ssd1306_draw_string_adafruit(0, 61, 34, tmp, WHITE, BLACK);
 
-        ssd1306_draw_hline(0, 0, 57, 128, WHITE);
-        ssd1306_draw_string_adafruit(0, 2,  58, "< BACK",   WHITE, BLACK);
-        ssd1306_draw_string_adafruit(0, 61, 58, "SCAN&PAY", WHITE, BLACK);
+        
+        ssd1306_draw_string_adafruit(0, 2,  57, "< BACK",   WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 61, 57, "SCAN&PAY", WHITE, BLACK);
     }
 
     // ======================================================
@@ -702,30 +702,30 @@ void tampilkanStore() {
         const StoreProduk *p = storeGetItem(katKursor, subKursor, itemDipilih);
 
         // Header
-        ssd1306_fill_rectangle(0, 0, 0, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 14, 1, "TRX BERHASIL", BLACK, WHITE);
 
         // Ikon centang 32x32 di pojok kiri-bawah area konten
-        oled_draw_bitmap(0,0,21,icon_centang_32,32,32,WHITE);
+        oled_draw_bitmap(0,2,16,icon_centang_32,32,32,WHITE);
         
 
         // Panel kanan (x=35)
         scrollTeks(p->nama, tmp, 13, true);
-        ssd1306_draw_string_adafruit(0, 35, 12, tmp, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 37, 12, tmp, WHITE, BLACK);
 
         char hBuf[14];
         formatHarga(p->harga, hBuf, sizeof(hBuf));
         snprintf(buf, sizeof(buf), "Rp %s", hBuf);
-        ssd1306_draw_string_adafruit(0, 35, 23, buf, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 37, 23, buf, WHITE, BLACK);
 
         scrollTeks(targetID, tmp, 13, true);
-        ssd1306_draw_string_adafruit(0, 35, 34, tmp, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 37, 34, tmp, WHITE, BLACK);
 
-        ssd1306_draw_string_adafruit(0, 35, 45, p->kode, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 37, 45, p->kode, WHITE, BLACK);
 
         // Footer
-        ssd1306_fill_rectangle(0, 0, 54, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2, 55, "< HOME", BLACK, WHITE);
+        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
     }
 
     // ======================================================
@@ -736,29 +736,29 @@ void tampilkanStore() {
     else if (appMode == 12) {
         const StoreProduk *p = storeGetItem(katKursor, subKursor, itemDipilih);
 
-        ssd1306_fill_rectangle(0, 0, 0, 128, 10, WHITE);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 22, 1, "TRX GAGAL", BLACK, WHITE);
 
         // Ikon silang 32x32 pojok kiri-bawah
-        oled_draw_bitmap(0,0,21,icon_silang_32,32,32,WHITE);
+        oled_draw_bitmap(0,2,16,icon_silang_32,32,32,WHITE);
         
 
         // Panel kanan (x=35)
         scrollTeks(p->nama, tmp, 13, true);
-        ssd1306_draw_string_adafruit(0, 35, 12, tmp, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0,37, 12, tmp, WHITE, BLACK);
 
         char hBuf[14];
         formatHarga(p->harga, hBuf, sizeof(hBuf));
         snprintf(buf, sizeof(buf), "Rp %s", hBuf);
-        ssd1306_draw_string_adafruit(0, 35, 23, buf, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0,37, 23, buf, WHITE, BLACK);
 
         scrollTeks(targetID, tmp, 13, true);
-        ssd1306_draw_string_adafruit(0, 35, 34, tmp, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0,37, 34, tmp, WHITE, BLACK);
 
-        ssd1306_draw_string_adafruit(0, 35, 45, "Coba lagi!", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0,37, 45, "Coba lagi!", WHITE, BLACK);
 
-        ssd1306_fill_rectangle(0, 0, 54, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2, 55, "< HOME", BLACK, WHITE);
+        ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
     }
 
     ssd1306_refresh(0, true);
@@ -771,7 +771,7 @@ void tampilkanBrightness() {
     ssd1306_clear(0);
     char buf[16];
 
-    ssd1306_fill_rectangle(0, 0, 0, 128, 10, WHITE);
+    ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
     ssd1306_draw_string_adafruit(0, 35, 1, "BRIGHTNESS", BLACK, WHITE);
 
     ssd1306_draw_rectangle(0, 14, 28, 100, 12, WHITE);
@@ -781,9 +781,9 @@ void tampilkanBrightness() {
     snprintf(buf, sizeof(buf), "%d%%", (int)map(kecerahan, 0, 255, 0, 100));
     ssd1306_draw_string_adafruit(0, 55, 45, buf, WHITE, BLACK);
 
-    ssd1306_fill_rectangle(0, 0, 54, 128, 10, WHITE);
-    ssd1306_draw_string_adafruit(0, 2,  55, "[<]BACK",    BLACK, WHITE);
-    ssd1306_draw_string_adafruit(0, 62, 55, "[>]+[OK]-",  BLACK, WHITE);
+    ssd1306_fill_rectangle(0, 0, 56, 128, 10, WHITE);
+    ssd1306_draw_string_adafruit(0, 2, 56, "[<]BACK",    BLACK, WHITE);
+    ssd1306_draw_string_adafruit(0, 62, 56, "[>]+[OK]-",  BLACK, WHITE);
     ssd1306_refresh(0, true);
 }
 
@@ -812,7 +812,7 @@ void renderRebootScreen() {
     ssd1306_clear(0);
     ssd1306_draw_rectangle(0, 5, 5, 118, 54, WHITE);
     ssd1306_draw_string_adafruit(0, 20, 20, "Reboot sekarang?", WHITE, BLACK);
-    ssd1306_draw_string_adafruit(0, 2,  55, "< NO",  WHITE, BLACK);
-    ssd1306_draw_string_adafruit(0, 104,55, "[OK]",  WHITE, BLACK);
+    ssd1306_draw_string_adafruit(0, 2, 56, "< NO",  WHITE, BLACK);
+    ssd1306_draw_string_adafruit(0, 104, 56, "[OK]",  WHITE, BLACK);
     ssd1306_refresh(0, true);
 }

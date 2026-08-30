@@ -347,6 +347,16 @@ void handleStoreInput(int btn) {
     else if (appMode == 10) {
         if (btn == BTN_LEFT) appMode = 9;
     }
+    else if (appMode == 11) {
+        if (btn == BTN_LEFT) {
+            appMode = 0; diSubMenu = false;
+            katKursor = katIdx = 0;
+            subKursor = 0; atasMenu = 0;
+        }
+        else if (btn == BTN_RIGHT) {
+            appMode = 11;
+        }
+    }
 
     // --------------------------------------------------
     // LAYAR 11: TRX BERHASIL
@@ -358,6 +368,9 @@ void handleStoreInput(int btn) {
             appMode = 0; diSubMenu = false;
             katKursor = katIdx = 0;
             subKursor = 0; atasMenu = 0;
+        }
+        else if (btn == BTN_RIGHT) {
+            appMode = 12;
         }
     }
 }
