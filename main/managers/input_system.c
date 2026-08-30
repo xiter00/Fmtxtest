@@ -444,7 +444,11 @@ void handleStoreInput(int btn) {
     // --------------------------------------------------
     else if (appMode == 5) {
         static const char CS_ANGKA[] = "0123456789";
-        static const char CS_HURUF[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@ _-.#";
+        // Urutan dioptimasi biar rata-rata pencet lebih dikit buat email/username:
+        // huruf kecil dulu (paling sering) → angka → @ . (wajib ada di email,
+        // ditaro di depan biar gak perlu muter jauh) → _ - → huruf besar
+        // (paling jarang dipake di email/ID) → sisa simbol.
+        static const char CS_HURUF[] = "abcdefghijklmnopqrstuvwxyz0123456789@._-ABCDEFGHIJKLMNOPQRSTUVWXYZ #";
         const char *cs    = inputAngka ? CS_ANGKA : CS_HURUF;
         int         csLen = inputAngka ? 10 : 68;
 

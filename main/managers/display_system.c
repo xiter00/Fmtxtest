@@ -954,6 +954,13 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 0, 54, "< Coba lagi", WHITE, BLACK);
         ssd1306_refresh(0, true);
     }
+
+    // Refresh wajib buat LAYAR TOKO (2,3,4,5,6,9-12) — cabang-cabang itu
+    // gak punya ssd1306_refresh() sendiri, jadi HARUS ada ini di sini,
+    // kalau gak, gambar cuma nyangkut di framebuffer & gak pernah nongol
+    // di OLED (keliatan kayak "freeze" padahal state di baliknya jalan normal).
+    // Buat layar 13-17 ini jadi refresh kedua — aman, cuma dikit boros.
+    ssd1306_refresh(0, true);
 }
 
     
