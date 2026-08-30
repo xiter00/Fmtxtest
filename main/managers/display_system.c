@@ -826,8 +826,8 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
                 if (idx >= wifiTotal) break;
                 int y = 12 + i * 17;
                 if (idx == wifiKursor) ssd1306_fill_rectangle(0, 0, y-1, 128, 15, WHITE);
-                char baris[33];
-                snprintf(baris, sizeof(baris), "%s%s",
+                char baris[40];
+                snprintf(baris, sizeof(baris), "%s%.32s",
                     wifiList[idx].has_pass ? "[*]" : "[O]",
                     wifiList[idx].ssid);
                 ssd1306_draw_string_adafruit(0, 2, y+1, baris,
