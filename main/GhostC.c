@@ -8,54 +8,40 @@
 
 extern void task_display(void *pvParameters);
 
-// ==========================================================
-// MENU STATE
-// ==========================================================
-bool inSubMenu   = false;
-int  currentMenu = 0;
-int  currentSub  = 0;
-int  topMenu     = 0;
+// --- NAVIGASI MENU ---
+int  katKursor = 0;
+int  subKursor = 0;
+int  atasMenu  = 0;
+bool diSubMenu = false;
 
-// ==========================================================
-// APP STATE
-// ==========================================================
-int appMode         = 0;
-int brightnessValue = 150;
+// --- CAROUSEL LOGO ---
+int      katIdx   = 0;
+int      katArah  = 0;
+bool     katAnim  = false;
+uint32_t katAnimT = 0;
 
-// ==========================================================
-// CAROUSEL ANIMASI
-// ==========================================================
-int      carouselCurrentIdx  = 0;
-int      carouselDirection   = 0;
-bool     carouselAnimating   = false;
-uint32_t carouselAnimStart   = 0;
+// --- APP STATE ---
+int appMode   = 0;
+int kecerahan = 150;
 
-// ==========================================================
-// DEKORASI LATAR
-// ==========================================================
-int starX[5] = {0};
-int starY[5] = {0};
+// --- BINTANG DEKORASI ---
+int bintangX[5] = {0};
+int bintangY[5] = {0};
 
-// ==========================================================
-// STORE STATE
-// ==========================================================
-int       storeKategori     = 0;
-int       storeSubMenuIdx   = 0;
-int       storeItemCursor   = 0;
-int       storeScrollPos    = 0;
-int       storeSelectedItem = -1;
-int       storeFieldCursor  = 0;
-int       storeCharPos      = 0;
-int       storeCharIdx      = 0;
-int       storeTotalItems   = 0;
-int       storeTotalFields  = 0;
-int       storePayMethod    = 0;
-StoreField storeFields[4]   = {0};
+// --- STATE STORE ---
+int       itemKursor  = 0;
+int       itemScroll  = 0;
+int       itemDipilih = -1;
+int       itemTotal   = 0;
+int       fieldKursor = 0;
+int       charIdx     = 0;
+int       totalField  = 0;
+int       caraBayar   = 0;
+StoreField field[4]   = {0};
+char      targetID[64]= {0};
+bool      inputAngka  = true;   // Default: mode angka (0-9)
 
-// ==========================================================
-// APP MAIN
-// ==========================================================
 void app_main(void) {
-    ESP_LOGI("JirStore", "Booting JirStore...");
-    xTaskCreate(task_display, "DisplayTask", 8192, NULL, 1, NULL);
+    ESP_LOGI("JirStore", "Booting...");
+    xTaskCreate(task_display, "Display", 8192, NULL, 1, NULL);
 }

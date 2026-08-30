@@ -5,87 +5,78 @@
 #include <stdint.h>
 #include "driver/gpio.h"
 
-// ==========================================================
-// PIN JOYSTICK (3 TOMBOL)
-// ==========================================================
+// --- PIN TOMBOL ---
 #define PIN_LEFT  5
 #define PIN_RIGHT 6
 #define PIN_OK    7
 #define WHITE 1
 #define BLACK 0
-
 #define BTN_NONE  0
 #define BTN_LEFT  1
 #define BTN_RIGHT 2
 #define BTN_OK    3
 
 // ==========================================================
-// APP MODE MAP
-// 0  = Main Menu (Carousel Logo + SubMenu)
-// 3  = Brightness
-// 9  = Store: Daftar Item Produk
-// 10 = Store: Detail Item (full screen)
-// 11 = Store: List Input Field (User ID, Zone ID, dst)
-// 12 = Store: Char Input (input 1 field per huruf)
-// 13 = Store: Konfirmasi Detail (review sebelum bayar)
-// 14 = About
-// 15 = Reboot
-// 18 = Store: Action Menu (BAYAR / QRIS)
-// 19 = Store: QRIS Screen
+// PETA LAYAR (appMode) — URUT 0-12
+// 0  = Menu Utama (Logo kategori + SubMenu)
+// 1  = Brightness
+// 2  = Daftar Item Produk
+// 3  = Detail Item (full screen)
+// 4  = Input Field (User ID / Nomor HP / dll)
+// 5  = Input Karakter (ketik per huruf)
+// 6  = Konfirmasi (review sebelum bayar)
+// 7  = About
+// 8  = Reboot
+// 9  = Aksi Bayar (BAYAR / QRIS)
+// 10 = Layar QRIS
+// 11 = TRX Berhasil
+// 12 = TRX Gagal
 // ==========================================================
 
-// ==========================================================
-// STORE DATA STRUCTS
-// ==========================================================
+// --- STRUCT PRODUK ---
 typedef struct {
-    char nama[28];   // Nama produk tampil di layar
-    char kode[12];   // Kode produk buat API H2H
-    int  harga;      // Harga dalam rupiah
+    char nama[28];   // Nama produk (tampil layar)
+    char kode[12];   // Kode buat API H2H
+    int  harga;      // Harga rupiah
 } StoreProduk;
 
+// --- STRUCT FIELD INPUT ---
 typedef struct {
     char label[14];  // "User ID", "Zone ID", "Nomor HP", dll
-    char value[28];  // Nilai yang diinput user
+    char value[28];  // Nilai yang diketik user
 } StoreField;
 
-// ==========================================================
-// STORE STATE EXTERN
-// ==========================================================
-extern int       storeKategori;       // 0=Diamond, 1=Pulsa, 2=EMoney
-extern int       storeSubMenuIdx;     // Brand/operator aktif
-extern int       storeItemCursor;     // Kursor item di list (0-2, visible row)
-extern int       storeScrollPos;      // Scroll offset item list
-extern int       storeSelectedItem;   // Index item yang dipilih
-extern int       storeFieldCursor;    // Field yang dipilih di input list
-extern int       storeCharPos;        // Posisi karakter di buffer
-extern int       storeCharIdx;        // Index di CHARSET (cycling)
-extern int       storeTotalItems;     // Total item submenu aktif
-extern int       storeTotalFields;    // Jumlah field input produk ini
-extern int       storePayMethod;      // 0=BAYAR, 1=QRIS
-extern StoreField storeFields[4];     // Max 4 field input
+// --- STATE STORE ---
+extern int       katKursor;         // Kategori aktif (0-3)
+extern int       subKursor;         // Submenu aktif
+extern int       atasMenu;          // Scroll offset submenu
+extern bool      diSubMenu;         // True = di dalam submenu
 
-// ==========================================================
-// MENU STATE EXTERN
-// ==========================================================
-extern bool inSubMenu;
-extern int  currentMenu;      // Kategori aktif (0-3)
-extern int  currentSub;       // Item submenu aktif
-extern int  topMenu;          // Scroll offset submenu
-extern int  brightnessValue;
+extern int       katIdx;            // Index kategori di logo carousel
+extern int       katArah;           // Arah geser carousel (-1/0/1)
+extern bool      katAnim;           // Lagi animasi carousel?
+extern uint32_t  katAnimT;          // Timestamp mulai animasi
+
+extern int       itemKursor;        // Kursor baris item (0-2)
+extern int       itemScroll;        // Scroll offset daftar item
+extern int       itemDipilih;       // Index item yang dipilih
+extern int       itemTotal;         // Total item submenu aktif
+
+extern int       fieldKursor;       // Field yang aktif di input list
+extern int       charIdx;           // Index karakter di CHARSET
+extern int       totalField;        // Jumlah field input produk ini
+extern int       caraBayar;         // 0=BAYAR, 1=QRIS
+
+extern StoreField field[4];         // Max 4 field input
+extern char      targetID[64];      // ID target: "idGame|zoneID" atau "nomorHP"
+extern bool      inputAngka;        // true=mode angka(0-9) | false=mode huruf(A-Z+)
+
+// --- APP STATE ---
 extern int  appMode;
+extern int  kecerahan;
 
-// ==========================================================
-// CAROUSEL ANIMASI
-// ==========================================================
-extern int       carouselCurrentIdx;
-extern int       carouselDirection;
-extern bool      carouselAnimating;
-extern uint32_t  carouselAnimStart;
-
-// ==========================================================
-// DEKORASI LATAR
-// ==========================================================
-extern int starX[5];
-extern int starY[5];
+// --- BINTANG DEKORASI ---
+extern int bintangX[5];
+extern int bintangY[5];
 
 #endif // GLOBALS_H

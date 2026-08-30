@@ -7,378 +7,357 @@
 #include "driver/gpio.h"
 #include "globals.h"
 
-// ==========================================================
-// FUNGSI DARI display_system.c (extern)
-// ==========================================================
-extern int storeGetTotalItems(int kat, int sub);
-extern int storeGetTotalSubs(int kat);
-extern void storeSetupFields(int kat, int sub);
+// --- Extern dari display_system.c ---
+extern int storeGetTotal(int kat, int sub);
+extern void storeSetupField(int kat, int sub);
 extern void setOledBrightness(uint8_t level);
-extern const int totalSubPerKat[];
+extern const int totalSubKat[];
 
 // ==========================================================
-// CHARSET UNTUK INPUT KARAKTER
-// Urutan: angka dulu (paling sering dipakai buat user ID),
-// lalu huruf besar, kecil, simbol
+// CHARSET — 2 MODE KEYBOARD
+// ANGKA: cycling 0-9 (10 karakter) — default, super cepat buat nomor
+// HURUF: A-Z + simbol (58 karakter) — buat email, nama, dll
 // ==========================================================
-#define CHARSET_LEN 68
-static const char CHARSET[] =
-    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz _-.";
+// Charset didefinisikan lokal di handleStoreInput mode 5
 
-// ==========================================================
-// HELPER MILLIS
-// ==========================================================
-uint32_t input_millis() {
-    return (uint32_t)(esp_timer_get_time() / 1000);
-}
+uint32_t ms() { return (uint32_t)(esp_timer_get_time() / 1000); }
 
-// ==========================================================
-// FORWARD DECLARATION
-// ==========================================================
+// Forward
 void handleStoreInput(int btn);
 
 // ==========================================================
-// HANDLE JOYSTICK — ENTRY POINT UTAMA
-// Dipanggil tiap frame dari task_display
+// BUILD targetID
+// ML (ada Zone ID): "idGame|zoneID"
+// Lainnya         : langsung value
+// Dipanggil saat transisi layar 6 → layar 9
+// ==========================================================
+void buildTargetID() {
+    memset(targetID, 0, sizeof(targetID));
+    if (totalField == 2) {
+        // Ada dua field (contoh: ML = User ID + Zone ID)
+        snprintf(targetID, sizeof(targetID), "%s|%s",
+                 field[0].value, field[1].value);
+    } else {
+        snprintf(targetID, sizeof(targetID), "%s", field[0].value);
+    }
+}
+
+// ==========================================================
+// HANDLE JOYSTICK — ENTRY POINT
 // ==========================================================
 void handleJoystick() {
     static uint32_t lastPress = 0;
-    uint32_t now = input_millis();
+    uint32_t now = ms();
 
-    // Debounce adaptif:
-    // - Mode char input: lebih cepat supaya bisa cycling huruf
-    // - Mode lain: normal 250ms
-    uint32_t debounce = (appMode == 12) ? 110 : 250;
-    if (now - lastPress < debounce) return;
+    // ---- LAYAR 5: AUTO-REPEAT RIGHT + debounce terpisah OK/LEFT ----
+    // Tahan RIGHT → cycling makin cepat (600ms=100ms/step, 1200ms=50ms/step)
+    // OK/LEFT punya debounce sendiri supaya auto-repeat tidak ganggu
+    if (appMode == 5) {
+        static uint32_t tHold   = 0;
+        static bool     hold    = false;
+        static uint32_t tRep    = 0;
+        static uint32_t lastOL  = 0;  // Debounce khusus OK & LEFT
+
+        bool rDown = (gpio_get_level(PIN_RIGHT) == 0);
+        bool lDown = (gpio_get_level(PIN_LEFT)  == 0);
+        bool oDown = (gpio_get_level(PIN_OK)    == 0);
+
+        if (rDown) {
+            // --- Auto-repeat RIGHT ---
+            if (!hold) {
+                if (now - lastPress < 120) return;
+                hold = true; tHold = now; tRep = now;
+                lastPress = now;
+                handleStoreInput(BTN_RIGHT);
+            } else {
+                uint32_t d  = now - tHold;
+                uint32_t iv = (d > 1200) ? 50 : (d > 600) ? 100 : 0;
+                if (iv > 0 && now - tRep >= iv) {
+                    tRep = now;
+                    handleStoreInput(BTN_RIGHT);
+                }
+            }
+            return;
+        } else {
+            hold = false;
+        }
+
+        // --- OK / LEFT: debounce terpisah 150ms ---
+        if (!lDown && !oDown) return;
+        if (now - lastOL < 150) return;
+        lastOL = now;
+        if      (lDown) handleStoreInput(BTN_LEFT);
+        else if (oDown) handleStoreInput(BTN_OK);
+        return;
+    }
+
+    // ---- Debounce normal untuk semua mode lain ----
+    if (now - lastPress < 250) return;
 
     int btn = BTN_NONE;
     if      (gpio_get_level(PIN_LEFT)  == 0) btn = BTN_LEFT;
     else if (gpio_get_level(PIN_RIGHT) == 0) btn = BTN_RIGHT;
     else if (gpio_get_level(PIN_OK)    == 0) btn = BTN_OK;
-
     if (btn == BTN_NONE) return;
     lastPress = now;
 
-    // ======================================================
-    // STORE MODES: Delegasi ke handleStoreInput
-    // ======================================================
-    if ((appMode >= 9 && appMode <= 13) || appMode == 18 || appMode == 19) {
-        handleStoreInput(btn);
-        return;
+    // Delegasi ke store handler (layar 2-6 dan 9-12)
+    if ((appMode >= 2 && appMode <= 6) || (appMode >= 9 && appMode <= 12)) {
+        handleStoreInput(btn); return;
     }
 
-    // ======================================================
-    // BRIGHTNESS (appMode 3)
-    // < = kembali | > = naik +20 | OK = turun -20
-    // ======================================================
-    if (appMode == 3) {
-        if (btn == BTN_LEFT) {
-            appMode   = 0;
-            inSubMenu = true;
-            currentMenu = 3;
-            currentSub  = 0;
-        } else if (btn == BTN_RIGHT) {
-            brightnessValue = (brightnessValue + 20 > 255) ? 0 : brightnessValue + 20;
-            setOledBrightness((uint8_t)brightnessValue);
+    // ---- BRIGHTNESS (layar 1) ----
+    if (appMode == 1) {
+        if      (btn == BTN_LEFT)  { appMode=0; diSubMenu=true; katKursor=3; subKursor=0; }
+        else if (btn == BTN_RIGHT) {
+            kecerahan = (kecerahan + 20 > 255) ? 0 : kecerahan + 20;
+            setOledBrightness((uint8_t)kecerahan);
         } else if (btn == BTN_OK) {
-            brightnessValue = (brightnessValue - 20 < 0) ? 255 : brightnessValue - 20;
-            setOledBrightness((uint8_t)brightnessValue);
+            kecerahan = (kecerahan - 20 < 0) ? 255 : kecerahan - 20;
+            setOledBrightness((uint8_t)kecerahan);
         }
         return;
     }
 
-    // ======================================================
-    // ABOUT (appMode 14)
-    // < = kembali ke settings submenu
-    // ======================================================
-    if (appMode == 14) {
-        if (btn == BTN_LEFT) {
-            appMode   = 0;
-            inSubMenu = true;
-            currentMenu = 3;
-            currentSub  = 1;
-        }
+    // ---- ABOUT (layar 7) ----
+    if (appMode == 7) {
+        if (btn == BTN_LEFT) { appMode=0; diSubMenu=true; katKursor=3; subKursor=1; }
         return;
     }
 
-    // ======================================================
-    // REBOOT (appMode 15)
-    // < = kembali | OK = reboot sekarang
-    // ======================================================
-    if (appMode == 15) {
-        if (btn == BTN_LEFT) {
-            appMode   = 0;
-            inSubMenu = true;
-            currentMenu = 3;
-            currentSub  = 2;
-        } else if (btn == BTN_OK) {
-            esp_restart();
-        }
+    // ---- REBOOT (layar 8) ----
+    if (appMode == 8) {
+        if      (btn == BTN_LEFT) { appMode=0; diSubMenu=true; katKursor=3; subKursor=2; }
+        else if (btn == BTN_OK)   { esp_restart(); }
         return;
     }
 
-    // ======================================================
-    // MAIN MENU (appMode 0)
-    // ======================================================
+    // ---- MENU UTAMA (layar 0) ----
     if (appMode == 0) {
-        if (!inSubMenu) {
-            // --- CAROUSEL LOGO ---
-            // > = next kategori | < = prev kategori | OK = masuk submenu
+        if (!diSubMenu) {
+            // Carousel logo — > = next | < = prev | OK = masuk submenu
             if (btn == BTN_RIGHT) {
-                carouselCurrentIdx = (carouselCurrentIdx + 1) % 4;
-                currentMenu        = carouselCurrentIdx;
-                carouselDirection  = 1;
-                carouselAnimating  = true;
-                carouselAnimStart  = now;
+                katIdx   = (katIdx + 1) % 4;
+                katKursor= katIdx;
+                katArah  = 1; katAnim = true; katAnimT = now;
             } else if (btn == BTN_LEFT) {
-                carouselCurrentIdx = (carouselCurrentIdx - 1 + 4) % 4;
-                currentMenu        = carouselCurrentIdx;
-                carouselDirection  = -1;
-                carouselAnimating  = true;
-                carouselAnimStart  = now;
+                katIdx   = (katIdx - 1 + 4) % 4;
+                katKursor= katIdx;
+                katArah  = -1; katAnim = true; katAnimT = now;
             } else if (btn == BTN_OK) {
-                inSubMenu   = true;
-                currentMenu = carouselCurrentIdx;
-                currentSub  = 0;
-                topMenu     = 0;
+                diSubMenu = true; katKursor = katIdx;
+                subKursor = 0;    atasMenu  = 0;
             }
         } else {
-            // --- LIST SUBMENU ---
-            // > = geser ke bawah | < = kembali ke carousel | OK = pilih item
-            int limitMenu = totalSubPerKat[currentMenu];
-
+            // List submenu — > = geser | < = balik carousel | OK = pilih
+            int lim = totalSubKat[katKursor];
             if (btn == BTN_RIGHT) {
-                if (currentSub < limitMenu - 1) {
-                    currentSub++;
-                    // Scroll otomatis kalau keluar dari jendela 5 baris
-                    if (currentSub >= topMenu + 5) topMenu++;
-                } else {
-                    // Wrap balik ke atas
-                    currentSub = 0;
-                    topMenu    = 0;
-                }
+                if (subKursor < lim-1) {
+                    subKursor++;
+                    if (subKursor >= atasMenu + 5) atasMenu++;
+                } else { subKursor = 0; atasMenu = 0; }
             } else if (btn == BTN_LEFT) {
-                inSubMenu = false;
-                topMenu   = 0;
+                diSubMenu = false; atasMenu = 0;
             } else if (btn == BTN_OK) {
-                if (currentMenu == 3) {
-                    // Kategori Settings — langsung ke sub-screen
-                    if      (currentSub == 0) appMode = 3;   // Brightness
-                    else if (currentSub == 1) appMode = 14;  // About
-                    else if (currentSub == 2) appMode = 15;  // Reboot
+                if (katKursor == 3) {
+                    // Settings
+                    if      (subKursor == 0) appMode = 1;
+                    else if (subKursor == 1) appMode = 7;
+                    else if (subKursor == 2) appMode = 8;
                 } else {
-                    // Kategori toko (Diamond / Pulsa / E-Money) — ke list produk
-                    storeKategori   = currentMenu;
-                    storeSubMenuIdx = currentSub;
-                    storeItemCursor = 0;
-                    storeScrollPos  = 0;
-                    storeTotalItems = storeGetTotalItems(storeKategori, storeSubMenuIdx);
-                    appMode = 9;
+                    // Toko → ke daftar item
+                    itemKursor = 0; itemScroll = 0;
+                    itemTotal  = storeGetTotal(katKursor, subKursor);
+                    appMode    = 2;
                 }
             }
         }
-        return;
     }
 }
 
 // ==========================================================
-// HANDLE SEMUA INPUT STORE
-// Satu fungsi untuk semua appMode store (9-13, 18, 19)
-//
-// DOUBLE-CLICK LOGIC:
-// - Hanya aktif di appMode 12 (char input)
-// - Double-OK  (2x dalam 450ms) = selesai input field
-// - Double-LEFT (2x dalam 450ms) = batal, hapus & kembali
+// HANDLE INPUT SEMUA LAYAR STORE
 // ==========================================================
 void handleStoreInput(int btn) {
-    static uint32_t lastOkTime   = 0;
-    static uint32_t lastLeftTime = 0;
-    #define DOUBLE_MS 450
+    static uint32_t tOK   = 0;  // Terakhir tekan OK  (buat double-click)
+    static uint32_t tLeft = 0;  // Terakhir tekan Left (buat double-click)
+    #define DBL 200              // Window double-click (ms)
 
-    uint32_t now = input_millis();
+    uint32_t now = ms();
 
     // --------------------------------------------------
-    // MODE 9: NAVIGASI LIST ITEM PRODUK
-    // > = scroll bawah | < = kembali | OK = pilih item
+    // LAYAR 2: DAFTAR ITEM
+    // > scroll | < kembali | OK pilih
     // --------------------------------------------------
-    if (appMode == 9) {
-        int total = storeGetTotalItems(storeKategori, storeSubMenuIdx);
-
+    if (appMode == 2) {
+        int tot = storeGetTotal(katKursor, subKursor);
         if (btn == BTN_RIGHT) {
-            // Gerak kursor ke bawah
-            int absoluteIdx = storeScrollPos + storeItemCursor;
-            if (absoluteIdx < total - 1) {
-                if (storeItemCursor < 2) {
-                    storeItemCursor++;  // Geser kursor (belum perlu scroll)
-                } else {
-                    storeScrollPos++;   // Kursor sudah di baris 3, scroll konten
-                }
-            } else {
-                // Wrap ke atas
-                storeItemCursor = 0;
-                storeScrollPos  = 0;
-            }
+            int abs = itemScroll + itemKursor;
+            if (abs < tot-1) {
+                if (itemKursor < 2) itemKursor++;
+                else itemScroll++;
+            } else { itemKursor=0; itemScroll=0; }
         } else if (btn == BTN_LEFT) {
-            // Kembali ke submenu
-            appMode   = 0;
-            inSubMenu = true;
-            currentMenu = storeKategori;
-            currentSub  = storeSubMenuIdx;
-        } else if (btn == BTN_OK) {
-            if (total > 0) {
-                storeSelectedItem = storeScrollPos + storeItemCursor;
-                appMode = 10; // Ke detail item
-            }
+            appMode=0; diSubMenu=true; katKursor=katKursor; subKursor=subKursor;
+        } else if (btn == BTN_OK && tot > 0) {
+            itemDipilih = itemScroll + itemKursor;
+            appMode = 3;
         }
     }
 
     // --------------------------------------------------
-    // MODE 10: DETAIL ITEM
-    // < = kembali ke list | OK = lanjut ke input data
+    // LAYAR 3: DETAIL ITEM
+    // < kembali | OK beli → setup field → layar 4
     // --------------------------------------------------
-    else if (appMode == 10) {
+    else if (appMode == 3) {
         if (btn == BTN_LEFT) {
-            appMode = 9;
+            appMode = 2;
         } else if (btn == BTN_OK) {
-            storeSetupFields(storeKategori, storeSubMenuIdx);
-            storeFieldCursor = 0;
-            storeCharIdx     = 0;
-            storeCharPos     = 0;
-            appMode = 11;
+            storeSetupField(katKursor, subKursor);
+            fieldKursor = 0; charIdx = 0;
+            appMode = 4;
         }
     }
 
     // --------------------------------------------------
-    // MODE 11: LIST INPUT FIELD
-    // > = geser ke field berikut | < = kembali | OK = edit / konfirmasi
+    // LAYAR 4: LIST INPUT FIELD
+    // > ganti field | < kembali | OK edit/konfirmasi
     // --------------------------------------------------
-    else if (appMode == 11) {
-        int totalRows = storeTotalFields + 1; // Fields + baris KONFIRMASI
-
+    else if (appMode == 4) {
+        int totRow = totalField + 1;
         if (btn == BTN_RIGHT) {
-            storeFieldCursor = (storeFieldCursor + 1) % totalRows;
+            fieldKursor = (fieldKursor + 1) % totRow;
         } else if (btn == BTN_LEFT) {
-            appMode = 10;
+            appMode = 3;
         } else if (btn == BTN_OK) {
-            if (storeFieldCursor < storeTotalFields) {
-                // Edit field ini: lanjut ke mode char input
-                storeCharPos = strlen(storeFields[storeFieldCursor].value);
-                storeCharIdx = 0;
-                // Reset double-click timer supaya tidak misfiring
-                lastOkTime   = 0;
-                lastLeftTime = 0;
-                appMode = 12;
+            if (fieldKursor < totalField) {
+                // Edit field → ke input karakter
+                charIdx    = 0; tOK = 0; tLeft = 0;
+                inputAngka = true; // Reset ke mode ANGKA setiap mulai field baru
+                appMode    = 5;
             } else {
-                // Tombol KONFIRMASI — cek semua field sudah terisi
-                bool semuaIsi = true;
-                for (int f = 0; f < storeTotalFields; f++)
-                    if (strlen(storeFields[f].value) == 0) { semuaIsi = false; break; }
-
-                if (semuaIsi) appMode = 13;
-                // Kalau belum isi, tidak pindah (layar sudah tunjukkan "ISI DULU!")
+                // Tombol KONFIRMASI — cek semua field terisi
+                bool ok = true;
+                for (int f = 0; f < totalField; f++)
+                    if (!strlen(field[f].value)) { ok=false; break; }
+                if (ok) appMode = 6;
             }
         }
     }
 
     // --------------------------------------------------
-    // MODE 12: INPUT KARAKTER (KETIK PER HURUF)
+    // LAYAR 5: INPUT KARAKTER — 2 MODE KEYBOARD
     //
-    // BTN_RIGHT       = ganti karakter (cycling CHARSET)
-    // BTN_OK (1x)     = tambah karakter ke buffer
-    // BTN_OK (2x)     = SELESAI — kembali ke field list
-    // BTN_LEFT (1x)   = hapus karakter terakhir
-    // BTN_LEFT (2x)   = BATAL — hapus semua value, kembali ke field list
+    // [ANGKA] default: cycling 0-9 saja (10 karakter, super cepat!)
+    // [HURUF]        : cycling A-Z + simbol (58 karakter)
+    //
+    // > = next char (tahan = auto-repeat makin cepat)
+    // OK (1x)  = tambah char ke buffer
+    // OK (2x)  = SELESAI — kembali ke field list
+    // < (1x)   = hapus char terakhir
+    //            ATAU jika buffer KOSONG = GANTI MODE (ANGKA↔HURUF)
+    // < (2x)   = BATAL — hapus semua, kembali ke field list
     // --------------------------------------------------
-    else if (appMode == 12) {
+    else if (appMode == 5) {
+        static const char CS_ANGKA[] = "0123456789";
+        static const char CS_HURUF[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz _-.";
+        const char *cs    = inputAngka ? CS_ANGKA : CS_HURUF;
+        int         csLen = inputAngka ? 10 : 58;
+
         if (btn == BTN_RIGHT) {
-            // Cycling karakter
-            storeCharIdx = (storeCharIdx + 1) % CHARSET_LEN;
+            charIdx = (charIdx + 1) % csLen;
         }
         else if (btn == BTN_OK) {
-            bool isDouble = (now - lastOkTime < DOUBLE_MS) && (lastOkTime != 0);
-            lastOkTime = now;
-
-            if (isDouble) {
-                // DOUBLE OK = selesai input field ini
-                storeCharIdx = 0;
-                appMode = 11;
+            bool dbl = (now - tOK < 400) && tOK;
+            tOK = now;
+            if (dbl) {
+                // 2x OK = SELESAI input field ini
+                charIdx = 0; appMode = 4;
             } else {
-                // SINGLE OK = tambah karakter ke buffer
-                int curLen = strlen(storeFields[storeFieldCursor].value);
-                if (curLen < 27) {
-                    storeFields[storeFieldCursor].value[curLen]     = CHARSET[storeCharIdx];
-                    storeFields[storeFieldCursor].value[curLen + 1] = '\0';
-                    storeCharIdx = 0; // Reset ke '0' setelah tambah
+                // 1x OK = tambah karakter ke buffer
+                int l = strlen(field[fieldKursor].value);
+                if (l < 27) {
+                    field[fieldKursor].value[l]   = cs[charIdx % csLen];
+                    field[fieldKursor].value[l+1] = '\0';
+                    charIdx = 0;
                 }
             }
         }
         else if (btn == BTN_LEFT) {
-            bool isDouble = (now - lastLeftTime < DOUBLE_MS) && (lastLeftTime != 0);
-            lastLeftTime = now;
-
-            if (isDouble) {
-                // DOUBLE LEFT = batal, hapus value field ini
-                memset(storeFields[storeFieldCursor].value, 0,
-                       sizeof(storeFields[storeFieldCursor].value));
-                storeCharPos = 0;
-                storeCharIdx = 0;
-                lastOkTime   = 0; // Reset juga OK timer
-                appMode = 11;
+            bool dbl = (now - tLeft < 400) && tLeft;
+            tLeft = now;
+            if (dbl) {
+                // 2x LEFT = BATAL: hapus semua, balik ke field list
+                memset(field[fieldKursor].value, 0, sizeof(field[fieldKursor].value));
+                charIdx = 0; tOK = 0; appMode = 4;
             } else {
-                // SINGLE LEFT = hapus karakter terakhir
-                int curLen = strlen(storeFields[storeFieldCursor].value);
-                if (curLen > 0) {
-                    storeFields[storeFieldCursor].value[curLen - 1] = '\0';
-                    storeCharIdx = 0;
+                int l = strlen(field[fieldKursor].value);
+                if (l > 0) {
+                    // 1x LEFT + ada isi = HAPUS karakter terakhir
+                    field[fieldKursor].value[l-1] = '\0';
+                    charIdx = 0;
+                } else {
+                    // 1x LEFT + buffer KOSONG = GANTI MODE
+                    inputAngka = !inputAngka;
+                    charIdx    = 0;
                 }
             }
         }
     }
 
     // --------------------------------------------------
-    // MODE 13: KONFIRMASI DETAIL
-    // < = kembali ke input | OK = lanjut ke action menu
+    // LAYAR 6: KONFIRMASI
+    // < kembali | OK → build targetID → layar 9
     // --------------------------------------------------
-    else if (appMode == 13) {
+    else if (appMode == 6) {
         if (btn == BTN_LEFT) {
-            appMode = 11;
+            appMode = 4;
         } else if (btn == BTN_OK) {
-            storePayMethod = 0; // Default BAYAR
-            appMode = 18;
+            buildTargetID();    // Bangun "idGame|zoneID" atau "nomorHP"
+            caraBayar = 0;
+            appMode   = 9;
         }
     }
 
     // --------------------------------------------------
-    // MODE 18: ACTION MENU (BAYAR / QRIS)
-    // > = toggle pilihan | < = kembali | OK = eksekusi
+    // LAYAR 9: AKSI BAYAR (BAYAR / QRIS)
+    // > toggle | < kembali | OK eksekusi
     // --------------------------------------------------
-    else if (appMode == 18) {
+    else if (appMode == 9) {
         if (btn == BTN_RIGHT) {
-            storePayMethod = (storePayMethod == 0) ? 1 : 0;
+            caraBayar = (caraBayar == 0) ? 1 : 0;
         } else if (btn == BTN_LEFT) {
-            appMode = 13;
+            appMode = 6;
         } else if (btn == BTN_OK) {
-            if (storePayMethod == 1) {
-                appMode = 19; // Tampilkan QRIS
+            if (caraBayar == 1) {
+                appMode = 10; // Tampilkan QRIS
             } else {
-                // BAYAR — TODO: panggil API H2H di sini
-                // Sementara kembali ke home sebagai placeholder
-                appMode     = 0;
-                inSubMenu   = false;
-                currentMenu = 0;
-                currentSub  = 0;
-                topMenu     = 0;
+                // BAYAR → TODO: panggil API H2H di sini
+                // Hasil API → appMode 11 (berhasil) atau 12 (gagal)
+                // Untuk placeholder, langsung ke TRX Berhasil:
+                appMode = 11;
             }
         }
     }
 
     // --------------------------------------------------
-    // MODE 19: QRIS SCREEN
-    // < = kembali ke action menu
+    // LAYAR 10: QRIS SCREEN
+    // < kembali ke aksi bayar
     // --------------------------------------------------
-    else if (appMode == 19) {
+    else if (appMode == 10) {
+        if (btn == BTN_LEFT) appMode = 9;
+    }
+
+    // --------------------------------------------------
+    // LAYAR 11: TRX BERHASIL
+    // LAYAR 12: TRX GAGAL
+    // < kembali ke home (menu utama)
+    // --------------------------------------------------
+    else if (appMode == 11 || appMode == 12) {
         if (btn == BTN_LEFT) {
-            appMode = 18;
+            appMode = 0; diSubMenu = false;
+            katKursor = katIdx = 0;
+            subKursor = 0; atasMenu = 0;
         }
     }
 }
