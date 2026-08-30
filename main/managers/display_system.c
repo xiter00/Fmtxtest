@@ -802,9 +802,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
     }
 
-    ssd1306_refresh(0, true);
-}
-
+    
 // ==========================================================
 // BRIGHTNESS
 // ==========================================================
@@ -914,6 +912,9 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 0, 54, "< Coba lagi", WHITE, BLACK);
         ssd1306_refresh(0, true);
     }
+    ssd1306_refresh(0, true);
+}
+
     
 
 void tampilkanBrightness() {
