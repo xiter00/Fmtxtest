@@ -13,7 +13,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_err.h"
-#include "cJSON.h"
+#include "cjson/cJSON.h"
 
 static const char *TAG = "system";
 
