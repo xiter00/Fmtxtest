@@ -51,6 +51,7 @@ void init_joystick() {
 // appMode 2-6, 9-12 → store (satu fungsi)
 // appMode 7  → about
 // appMode 8  → reboot
+// appMode 13-17 → WiFi (list/password/connecting/sukses/gagal)
 // ==========================================================
 void task_display(void *pvParameters) {
     init_joystick();
@@ -79,6 +80,7 @@ void task_display(void *pvParameters) {
             case 1:  tampilkanBrightness(); break;
             case 2: case 3: case 4: case 5:
             case 6: case 9: case 10: case 11: case 12:
+            case 13: case 14: case 15: case 16: case 17:
                 tampilkanStore(); break;
             case 7: renderAboutScreen();  break;
             case 8: renderRebootScreen(); break;
@@ -912,7 +914,6 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 0, 54, "< Coba lagi", WHITE, BLACK);
         ssd1306_refresh(0, true);
     }
-    ssd1306_refresh(0, true);
 }
 
     

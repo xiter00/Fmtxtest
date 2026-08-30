@@ -100,6 +100,16 @@ if (appMode == 5) {
         return;
     }
 
+    // ---- CONNECTING (mode 15) — auto-transition, HARUS dicek tiap loop ----
+    // Jangan taruh di bawah "if (btn == BTN_NONE) return;" karena kalau user
+    // gak pencet tombol pas nunggu konek, status connected/failed gak pernah
+    // kecek dan layar "Menghubungkan..." bakal nyangkut terus.
+    if (appMode == 15) {
+        if (wifiStatus == WIFI_STATUS_CONNECTED) appMode = 16;
+        else if (wifiStatus == WIFI_STATUS_FAILED) appMode = 17;
+        return;
+    }
+
     // ---- Debounce normal untuk semua mode lain ----
     if (now - lastPress < 250) return;
 
@@ -205,13 +215,6 @@ if (appMode == 5) {
                 if (l > 0) wifiPassBuf[l-1] = '\0';
             }
         }
-        return;
-    }
-
-    // ---- CONNECTING (mode 15) — auto-transition, cek status ----
-    if (appMode == 15) {
-        if (wifiStatus == WIFI_STATUS_CONNECTED) appMode = 16;
-        if (wifiStatus == WIFI_STATUS_FAILED)    appMode = 17;
         return;
     }
 
