@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -202,7 +203,7 @@ const int totalSubKat[] = {4, 4, 4, 4};  // Diakses dari input_system
 static const unsigned char *ikonGem[]   = {iconSmall_scan, iconSmall_wifi, iconSmall_sniff, iconSmall_spam};
 static const unsigned char *ikonPulsa[] = {iconSmall_apple, iconSmall_android, iconSmall_conn, iconSmall_scan};
 static const unsigned char *ikonMoney[] = {iconSmall_apple, iconSmall_android, iconSmall_conn, iconSmall_scan};
-static const unsigned char *ikonSet[]   = {iconSmall_bright, iconSmall_info, iconSmall_repeat};
+static const unsigned char *ikonSet[]   = {iconSmall_bright, iconSmall_info, iconSmall_repeat, iconSmall_wifi};
 
 // ==========================================================
 // DATA PRODUK
@@ -417,6 +418,52 @@ void tampilkanMenuUtama() {
 }
 
 // ==========================================================
+// CEK PRODUK KE SERVER — dijalanin di TASK TERPISAH
+// Jangan pernah manggil http_request() langsung di tampilkanStore()!
+// task_display jalan di loop yang sama buat gambar layar & baca joystick;
+// kalau HTTP-nya dipanggil langsung disitu, begitu koneksi lambat/gak ada
+// WiFi, esp_http_client_perform() bakal nge-block sampai HTTP_TIMEOUT_MS
+// (10 detik) dan SELURUH layar + tombol freeze total selama itu.
+// Makanya dipisah ke task sendiri: layar tetap jalan nampilin
+// "Checking Product...", task ini yang nunggu response di background.
+// ==========================================================
+typedef struct {
+    char kode[12];
+} CekProdukParam;
+
+static volatile bool s_cekProdukJalan = false;
+
+static void task_cek_produk(void *param) {
+    CekProdukParam *cp = (CekProdukParam *)param;
+
+    char isibody[200];
+    snprintf(isibody, sizeof(isibody), "api_key=%s&type=prabayar&code=%s", apiKeyH2H, cp->kode);
+
+    HttpReq req = {
+        .url = "https://atlantich2h.com/layanan/price_list",
+        .method = SYS_POST,
+        .body = isibody,
+        .content_type = "application/x-www-form-urlencoded",
+    };
+
+    HttpResp *res = http_request(&req);
+
+    bool tersedia = false;
+    if (res && res->ok) {
+        const char *status = resp_str(res, "status");
+        tersedia = (status != NULL && strcmp(status, "available") == 0);
+    }
+    if (res) fetch_free(res);
+
+    itemtersedia     = tersedia;
+    checkstatus      = true;
+    s_cekProdukJalan = false;
+
+    free(cp);
+    vTaskDelete(NULL);
+}
+
+// ==========================================================
 // TAMPILAN SEMUA LAYAR STORE
 // appMode 2  = Daftar Item
 // appMode 3  = Detail Item
@@ -476,38 +523,30 @@ void tampilkanStore() {
     // ======================================================
     else if (appMode == 3) {
         const StoreProduk *p = storeGetItem(katKursor, subKursor, itemDipilih);
-        
-        
-        char isibody[200];
-        snprintf(isibody, sizeof(isibody), "api_key=%s&type=prabayar&code=%s", apiKeyH2H, p->kode);
-        
- if (checkstatus == false) {
- ssd1306_draw_string_adafruit(0, 16, 28, "Checking Product", WHITE, BLACK);
-HttpReq req = {
-    .url = "https://atlantich2h.com/layanan/price_list",
-    .method = SYS_POST,
-    .body = isibody,
-    .content_type = "application/x-www-form-urlencoded",
-};
 
-// Eksekusi request-nya
-HttpResp *res = http_request(&req);
+        if (checkstatus == false) {
+            ssd1306_draw_string_adafruit(0, 16, 28, "Checking Product", WHITE, BLACK);
+            ssd1306_draw_string_adafruit(0, 12, 40, "Mohon tunggu...", WHITE, BLACK);
 
-if (res && res->ok) {
-    const char* tersedia = resp_str(res, "status");
-    if (tersedia != NULL && strcmp(tersedia, "available") == 0) {
-    itemtersedia = true;
-   } else {
-        itemtersedia = false;
-        
+            // Cek ke server dilempar ke task terpisah — layar & tombol
+            // TETAP jalan normal sambil nunggu, gak ada blocking sama sekali.
+            if (!s_cekProdukJalan) {
+                s_cekProdukJalan = true;
+                CekProdukParam *cp = malloc(sizeof(CekProdukParam));
+                if (cp) {
+                    strncpy(cp->kode, p->kode, sizeof(cp->kode) - 1);
+                    cp->kode[sizeof(cp->kode) - 1] = '\0';
+                    xTaskCreate(task_cek_produk, "cek_produk", 4096, cp, 5, NULL);
+                } else {
+                    // Malloc gagal (harusnya jarang) — anggap gak tersedia
+                    itemtersedia    = false;
+                    checkstatus     = true;
+                    s_cekProdukJalan = false;
+                }
+            }
         }
-        
-}
-fetch_free(res);
 
-checkstatus = true;
-}
-
+if (checkstatus == true) {
 if (itemtersedia == true) {
     ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 22, 1, "DETAIL PRODUK", BLACK, WHITE);
@@ -530,6 +569,7 @@ if (itemtersedia == true) {
 ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", WHITE, BLACK);
         }
+}
 
 
             }

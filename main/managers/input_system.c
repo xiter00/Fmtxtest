@@ -50,9 +50,9 @@ void handleJoystick() {
     static uint32_t lastPress = 0;
     uint32_t now = ms();
 
-    // ---- LAYAR 5: AUTO-REPEAT RIGHT + debounce terpisah OK/LEFT ----
+    // ---- LAYAR 5: AUTO-REPEAT RIGHT + TAP/TAHAN OK + debounce LEFT ----
     // Tahan RIGHT → cycling makin cepat (600ms=100ms/step, 1200ms=50ms/step)
-    // OK/LEFT punya debounce sendiri supaya auto-repeat tidak ganggu
+    // OK: tap = tambah karakter, tahan ≥450ms = selesai (gak nambah karakter nyasar)
 if (appMode == 5) {
         static uint32_t tHold   = 0;
         static bool     hold    = false;
@@ -85,18 +85,119 @@ if (appMode == 5) {
             hold = false;
         }
 
-        // --- OK / LEFT: hanya trigger sekali per penekanan (rising edge) ---
-        bool oPressed = oDown && !oPrev;
-        bool lPressed = lDown && !lPrev;
+        // --- OK: TAP = tambah karakter | TAHAN (≥450ms) = SELESAI, gak nambah apa-apa ---
+        // --- LEFT: tetap sekali per penekanan (rising edge) ---
+        static uint32_t tOKDown = 0;
+        static bool     okLong  = false;
+        #define OK_LONG_MS 450
+
+        if (oDown) {
+            if (!oPrev) {
+                tOKDown = now;      // OK baru mulai ditekan
+                okLong  = false;
+            } else if (!okLong && (now - tOKDown >= OK_LONG_MS)) {
+                // Ditahan cukup lama → SELESAI langsung, TANPA nambah karakter
+                okLong    = true;
+                charIdx   = 0;
+                appMode   = 4;
+                lastPress = now;   // cegah tombol yg masih ketahan kepencet ganda di mode 4
+            }
+        } else if (oPrev && !okLong) {
+            // Dilepas sebelum jadi TAHAN → itu tap biasa → tambah 1 karakter
+            handleStoreInput(BTN_OK);
+        }
         oPrev = oDown;
+
+        bool lPressed = lDown && !lPrev;
         lPrev = lDown;
+        if (lPressed && (now - lastOL >= 150)) {  // redam noise mekanik
+            lastOL = now;
+            handleStoreInput(BTN_LEFT);
+        }
+        return;
+    }
 
-        if (!oPressed && !lPressed) return;
-        if (now - lastOL < 150) return;  // redam noise mekanik
-        lastOL = now;
+    // ---- LAYAR 14: PASSWORD WIFI — sama kayak LAYAR 5, TAP/TAHAN OK ----
+    // OK: tap = tambah karakter | tahan ≥450ms = SUBMIT & connect (gak nambah
+    // karakter nyasar pas submit — ini yang bikin password ke-input salah)
+    else if (appMode == 14) {
+        static const char CS_WIFI[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@ _-.#!";
+        const int csWLen = 69;
 
-        if      (lPressed) handleStoreInput(BTN_LEFT);
-        else if (oPressed) handleStoreInput(BTN_OK);
+        static uint32_t tHold14   = 0;
+        static bool     hold14    = false;
+        static uint32_t tRep14    = 0;
+        static uint32_t tOKDown14 = 0;
+        static bool     okLong14  = false;
+        static uint32_t lastOL14  = 0;
+        static bool     oPrev14   = false;
+        static bool     lPrev14   = false;
+        static uint32_t tL14dbl   = 0;
+
+        bool rDown = (gpio_get_level(PIN_RIGHT) == 0);
+        bool lDown = (gpio_get_level(PIN_LEFT)  == 0);
+        bool oDown = (gpio_get_level(PIN_OK)    == 0);
+
+        if (rDown) {
+            // --- Auto-repeat RIGHT, sama kayak LAYAR 5 ---
+            if (!hold14) {
+                if (now - lastPress < 120) return;
+                hold14 = true; tHold14 = now; tRep14 = now;
+                lastPress = now;
+                charIdx = (charIdx + 1) % csWLen;
+            } else {
+                uint32_t d  = now - tHold14;
+                uint32_t iv = (d > 1200) ? 50 : (d > 600) ? 100 : 0;
+                if (iv > 0 && now - tRep14 >= iv) {
+                    tRep14 = now;
+                    charIdx = (charIdx + 1) % csWLen;
+                }
+            }
+            return;
+        } else {
+            hold14 = false;
+        }
+
+        // --- OK: TAP = tambah karakter | TAHAN = SUBMIT connect ---
+        if (oDown) {
+            if (!oPrev14) {
+                tOKDown14 = now;
+                okLong14  = false;
+            } else if (!okLong14 && (now - tOKDown14 >= OK_LONG_MS)) {
+                // Ditahan cukup lama → langsung connect, TANPA nambah karakter
+                okLong14  = true;
+                charIdx   = 0;
+                wifi_connect_selected();
+                appMode   = 15;
+                lastPress = now;
+            }
+        } else if (oPrev14 && !okLong14) {
+            // Tap biasa → tambah 1 karakter ke password
+            int l = strlen(wifiPassBuf);
+            if (l < 63) {
+                wifiPassBuf[l]   = CS_WIFI[charIdx % csWLen];
+                wifiPassBuf[l+1] = '\0';
+                charIdx = 0;
+            }
+        }
+        oPrev14 = oDown;
+
+        // --- LEFT: 1x hapus char terakhir | 2x cepat = batal (balik ke list) ---
+        bool lPressed = lDown && !lPrev14;
+        lPrev14 = lDown;
+        if (lPressed && (now - lastOL14 >= 150)) {
+            lastOL14 = now;
+            bool dbl = (now - tL14dbl < 400) && tL14dbl;
+            tL14dbl = now;
+            if (dbl) {
+                memset(wifiPassBuf, 0, sizeof(wifiPassBuf));
+                charIdx = 0;
+                appMode = 13;
+            } else {
+                int l = strlen(wifiPassBuf);
+                if (l > 0) wifiPassBuf[l-1] = '\0';
+            }
+        }
         return;
     }
 
@@ -180,44 +281,6 @@ if (appMode == 5) {
         return;
     }
 
-    // ---- WIFI PASSWORD (mode 14) — keyboard khusus WiFi ----
-    if (appMode == 14) {
-        static const char CS_WIFI[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@ _-.#!";
-        int csWLen = 69;
-        static uint32_t tOK14 = 0, tL14 = 0;
-
-        if (btn == BTN_RIGHT) {
-            charIdx = (charIdx + 1) % csWLen;
-        } else if (btn == BTN_OK) {
-            bool dbl = (now - tOK14 < 400) && tOK14;
-            tOK14 = now;
-            if (dbl) {
-                wifi_connect_selected();
-                charIdx = 0;
-                appMode = 15;
-            } else {
-                int l = strlen(wifiPassBuf);
-                if (l < 63) {
-                    wifiPassBuf[l]   = CS_WIFI[charIdx % csWLen];
-                    wifiPassBuf[l+1] = '\0';
-                    charIdx = 0;
-                }
-            }
-        } else if (btn == BTN_LEFT) {
-            bool dbl = (now - tL14 < 400) && tL14;
-            tL14 = now;
-            if (dbl) {
-                memset(wifiPassBuf, 0, sizeof(wifiPassBuf));
-                charIdx = 0;
-                appMode = 13;
-            } else {
-                int l = strlen(wifiPassBuf);
-                if (l > 0) wifiPassBuf[l-1] = '\0';
-            }
-        }
-        return;
-    }
-
     // ---- WIFI SUKSES (mode 16) ----
     if (appMode == 16) {
         if (btn == BTN_LEFT) {
@@ -284,8 +347,7 @@ if (appMode == 5) {
 // HANDLE INPUT SEMUA LAYAR STORE
 // ==========================================================
 void handleStoreInput(int btn) {
-    static uint32_t tOK   = 0;  // Terakhir tekan OK  (buat double-click)
-    static uint32_t tLeft = 0;  // Terakhir tekan Left (buat double-click)
+    static uint32_t tLeft = 0;  // Terakhir tekan Left (buat double-click BATAL)
     #define DBL 200              // Window double-click (ms)
 
     uint32_t now = ms();
@@ -315,6 +377,11 @@ void handleStoreInput(int btn) {
     // < kembali | OK beli → setup field → layar 4
     // --------------------------------------------------
     else if (appMode == 3) {
+     if (!checkstatus) {
+        // Masih nunggu hasil cek produk dari server (task background) —
+        // jangan proses OK/LEFT dulu biar gak kepencet berdasarkan status basi
+        return;
+     }
      if (itemtersedia == true) {
         if (btn == BTN_LEFT) {
             appMode = 2;
@@ -347,7 +414,7 @@ void handleStoreInput(int btn) {
         } else if (btn == BTN_OK) {
             if (fieldKursor < totalField) {
                 // Edit field → ke input karakter
-                charIdx    = 0; tOK = 0; tLeft = 0;
+                charIdx    = 0; tLeft = 0;
                 inputAngka = true; // Reset ke mode ANGKA setiap mulai field baru
                 appMode    = 5;
             } else {
@@ -363,39 +430,37 @@ void handleStoreInput(int btn) {
     // --------------------------------------------------
     // LAYAR 5: INPUT KARAKTER — 2 MODE KEYBOARD
     //
-    // [ANGKA] default: cycling 0-9 saja (10 karakter, super cepat!)
-    // [HURUF]        : cycling A-Z + simbol (58 karakter)
+    // [ANGKA] default: cycling 0-9 saja (10 karakter, super cepat buat HP/ID!)
+    // [HURUF]        : A-Z + a-z + 0-9 + simbol (68 karakter) — buat email/nama,
+    //                  udah termasuk angka juga jadi gak perlu balik ke mode
+    //                  ANGKA lagi kalau butuh angka di belakang huruf (email dll)
     //
     // > = next char (tahan = auto-repeat makin cepat)
-    // OK (1x)  = tambah char ke buffer
-    // OK (2x)  = SELESAI — kembali ke field list
+    // OK TAP        = tambah char ke buffer (langsung, gak nunggu apa-apa)
+    // OK TAHAN      = SELESAI — kembali ke field list (GAK nambah karakter)
     // < (1x)   = hapus char terakhir
     //            ATAU jika buffer KOSONG = GANTI MODE (ANGKA↔HURUF)
     // < (2x)   = BATAL — hapus semua, kembali ke field list
     // --------------------------------------------------
     else if (appMode == 5) {
         static const char CS_ANGKA[] = "0123456789";
-        static const char CS_HURUF[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@ _-.#";
+        static const char CS_HURUF[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@ _-.#";
         const char *cs    = inputAngka ? CS_ANGKA : CS_HURUF;
-        int         csLen = inputAngka ? 10 : 59;
+        int         csLen = inputAngka ? 10 : 68;
 
         if (btn == BTN_RIGHT) {
             charIdx = (charIdx + 1) % csLen;
         }
         else if (btn == BTN_OK) {
-            bool dbl = (now - tOK < 400) && tOK;
-            tOK = now;
-            if (dbl) {
-                // 2x OK = SELESAI input field ini
-                charIdx = 0; appMode = 4;
-            } else {
-                // 1x OK = tambah karakter ke buffer
-                int l = strlen(field[fieldKursor].value);
-                if (l < 27) {
-                    field[fieldKursor].value[l]   = cs[charIdx % csLen];
-                    field[fieldKursor].value[l+1] = '\0';
-                    charIdx = 0;
-                }
+            // SELESAI (tahan OK) udah ditangani di handleJoystick sebelum
+            // sampai sini — jadi begitu btn == BTN_OK nyampe ke sini, itu
+            // pasti tap biasa → tambah 1 karakter. Gak ada lagi karakter
+            // nyelip pas mau selesai.
+            int l = strlen(field[fieldKursor].value);
+            if (l < 27) {
+                field[fieldKursor].value[l]   = cs[charIdx % csLen];
+                field[fieldKursor].value[l+1] = '\0';
+                charIdx = 0;
             }
         }
         else if (btn == BTN_LEFT) {
@@ -404,7 +469,7 @@ void handleStoreInput(int btn) {
             if (dbl) {
                 // 2x LEFT = BATAL: hapus semua, balik ke field list
                 memset(field[fieldKursor].value, 0, sizeof(field[fieldKursor].value));
-                charIdx = 0; tOK = 0; appMode = 4;
+                charIdx = 0; appMode = 4;
             } else {
                 int l = strlen(field[fieldKursor].value);
                 if (l > 0) {
