@@ -7,7 +7,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
-#include "cJSON.h"
+#include "cjson/cJSON.h"
 
 // ============================================================
 // KONFIGURASI
