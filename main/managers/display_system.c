@@ -951,7 +951,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         // Carousel: [prev2][prev1][SEKARANG][next1][next2]
         drawCharCarousel(0, 26, CS_WIFI, csLen14, ci14);
 
-        char posStr[10];
+        char posStr[30];
         snprintf(posStr, sizeof(posStr), "%d/%d", ci14+1, csLen14);
         ssd1306_draw_string_adafruit(0, 90, 47, posStr, WHITE, BLACK);
 
