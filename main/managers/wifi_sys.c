@@ -15,8 +15,51 @@
 #include "esp_netif.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "esp_sntp.h"
 
 static const char *TAG = "wifi_sys";
+
+// ============================================================
+// AUTO-RETRY CONNECT
+// AP deket + password bener kadang tetep gagal di percobaan
+// pertama/kedua (4-way handshake keburu timeout / kepotong power
+// save). Daripada balikin FAILED ke user langsung, coba ulang
+// sendiri di background dulu beberapa kali sebelum nyerah.
+// ============================================================
+#define WIFI_MAX_RETRY 3
+static int s_retry_count = 0;
+
+// ============================================================
+// SNTP — wajib buat HTTPS. Sertifikat server dicek validitas
+// tanggalnya, dan ESP32 boot dengan jam ke-reset ke 1970 kalau
+// gak ada sync waktu. Tanpa ini, semua request HTTPS bakal gagal
+// verify cert (-0x2700 / MBEDTLS_ERR_X509_CERT_VERIFY_FAILED)
+// walaupun WiFi & sertifikatnya sendiri gak ada masalah.
+// ============================================================
+static bool s_sntp_started = false;
+
+static void _sntp_start_once(void) {
+    if (s_sntp_started) return;
+    s_sntp_started = true;
+
+    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    esp_netif_sntp_init(&cfg);
+    ESP_LOGI(TAG, "SNTP: mulai sync waktu...");
+}
+
+// Dipanggil dari system.c sebelum request HTTPS pertama. Nunggu
+// sync SELESAI (bukan cuma "udah mulai"), max timeout_ms, biar
+// verifikasi sertifikat gak gagal gara-gara jam masih 1970.
+bool wifi_wait_time_synced(uint32_t timeout_ms) {
+    if (!s_sntp_started) _sntp_start_once();
+    esp_err_t ret = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(timeout_ms));
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "SNTP: belum sync dalam %lu ms, lanjut coba request (mungkin masih gagal cert)", timeout_ms);
+        return false;
+    }
+    ESP_LOGI(TAG, "SNTP: waktu udah sync");
+    return true;
+}
 
 // ============================================================
 // STATE — definisi variabel extern
@@ -78,9 +121,18 @@ static void _wifi_event_handler(void *arg, esp_event_base_t base,
             memset(wifiConnectedSSID, 0, sizeof(wifiConnectedSSID));
 
             if (wifiStatus == WIFI_STATUS_CONNECTING) {
-                // Gagal konek (timeout / salah password)
-                wifiStatus = WIFI_STATUS_FAILED;
-                if (s_evt_grp) xEventGroupSetBits(s_evt_grp, BIT_FAILED);
+                // Gagal konek — sebelum nyerah, coba ulang sendiri dulu
+                // di background (AP deket + password bener sering baru
+                // berhasil di percobaan ke-2/3 gara-gara handshake
+                // keburu timeout, bukan berarti passwordnya salah).
+                if (s_retry_count < WIFI_MAX_RETRY) {
+                    s_retry_count++;
+                    ESP_LOGW(TAG, "Retry konek otomatis (%d/%d)...", s_retry_count, WIFI_MAX_RETRY);
+                    esp_wifi_connect();
+                } else {
+                    wifiStatus = WIFI_STATUS_FAILED;
+                    if (s_evt_grp) xEventGroupSetBits(s_evt_grp, BIT_FAILED);
+                }
             } else {
                 // Disconnect normal atau kehilangan koneksi
                 wifiStatus = WIFI_STATUS_IDLE;
@@ -135,8 +187,17 @@ void wifi_init(void) {
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_start();
 
+    // Matiin power save modem. Ini penyebab utama "AP udah deket, password
+    // bener, tapi tetep gagal konek 2-3x baru berhasil" — dengan PS aktif,
+    // radio suka "molor" pas lagi butuh terima paket 4-way handshake dari
+    // AP, jadi kepotong/timeout walau sinyal kuat. Trade-off: sedikit lebih
+    // boros daya, tapi buat device yang nempel di listrik gak masalah.
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
     s_evt_grp    = xEventGroupCreate();
     s_wifi_inited = true;
+
+    _sntp_start_once();  // Mulai sync waktu sedini mungkin (gak nunggu konek)
 
     ESP_LOGI(TAG, "WiFi init OK");
 }
@@ -192,7 +253,8 @@ void wifi_connect_selected(void) {
 
     esp_wifi_set_config(WIFI_IF_STA, &cfg);
 
-    wifiStatus = WIFI_STATUS_CONNECTING;
+    wifiStatus   = WIFI_STATUS_CONNECTING;
+    s_retry_count = 0;  // Reset hitungan auto-retry buat percobaan konek baru ini
     if (s_evt_grp) xEventGroupClearBits(s_evt_grp, BIT_CONNECTED | BIT_FAILED);
 
     esp_wifi_connect();

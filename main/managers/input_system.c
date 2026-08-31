@@ -73,8 +73,11 @@ if (appMode == 5) {
                 lastPress = now;
                 handleStoreInput(BTN_RIGHT);
             } else {
+                // Ramp lebih agresif: mulai repeat lebih cepet (300ms,
+                // bukan 600ms nunggu) dan step makin rapet sampai 25ms
+                // di puncaknya biar geser karakter kerasa jauh lebih gesit.
                 uint32_t d  = now - tHold;
-                uint32_t iv = (d > 1200) ? 50 : (d > 600) ? 100 : 0;
+                uint32_t iv = (d > 900) ? 25 : (d > 500) ? 50 : (d > 300) ? 90 : 0;
                 if (iv > 0 && now - tRep >= iv) {
                     tRep = now;
                     handleStoreInput(BTN_RIGHT);
@@ -145,8 +148,10 @@ if (appMode == 5) {
                 lastPress = now;
                 charIdx = (charIdx + 1) % csWLen;
             } else {
+                // Sama kayak layar 5: ramp lebih agresif biar gak kerasa delay
+                // dan geser charset password jadi lebih cepet.
                 uint32_t d  = now - tHold14;
-                uint32_t iv = (d > 1200) ? 50 : (d > 600) ? 100 : 0;
+                uint32_t iv = (d > 900) ? 25 : (d > 500) ? 50 : (d > 300) ? 90 : 0;
                 if (iv > 0 && now - tRep14 >= iv) {
                     tRep14 = now;
                     charIdx = (charIdx + 1) % csWLen;

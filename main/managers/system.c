@@ -16,8 +16,10 @@
 #include "esp_err.h"
 #include "cJSON.h"
 #include "server_cert.h"
+#include "wifi_sys.h"
 
 static const char *TAG = "system";
+static bool s_time_synced = false;
 
 // ============================================================
 // INTERNAL: Buffer context buat event handler
@@ -110,6 +112,14 @@ static HttpResp *_do_request(
 
     ESP_LOGI(TAG, "=== MULAI REQUEST === url=%s method=%d body=%s",
              url, method, body ? body : "(tidak ada body)");
+
+    // Jam device HARUS udah sync sebelum request HTTPS pertama, kalau
+    // enggak verifikasi sertifikat server bakal gagal terus (-0x2700)
+    // walau WiFi & sertifikatnya sendiri gak ada masalah. Cukup dicek
+    // sekali per boot — abis itu waktunya tetep jalan sendiri.
+    if (!s_time_synced) {
+        s_time_synced = wifi_wait_time_synced(5000);
+    }
 
     // Alokasi buffer response di heap (bukan stack, aman buat task kecil)
     char *buf = calloc(HTTP_MAX_BODY, 1);

@@ -68,4 +68,9 @@ const char *wifi_get_ip(void);
 // RSSI icon: 0-3 (0=lemah, 3=kuat) — buat tampil di OLED
 int wifi_rssi_bar(int rssi);
 
+// Nunggu jam device selesai sync via SNTP (max timeout_ms). Panggil ini
+// sekali sebelum request HTTPS pertama, kalau enggak sertifikat server
+// bakal gagal diverifikasi karena jam device belum bener (-0x2700).
+bool wifi_wait_time_synced(uint32_t timeout_ms);
+
 #endif // WIFI_SYS_H
