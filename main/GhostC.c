@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "globals.h"
 #include "wifi_sys.h"
+#include "weblog_sys.h"
 #include "photo_data.h"
 
 extern void task_display(void *pvParameters);
@@ -56,6 +57,11 @@ const int  CS_HURUF_LEN = sizeof(CS_HURUF) - 1;
 const int  CS_WIFI_LEN  = sizeof(CS_WIFI)  - 1;
 
 void app_main(void) {
+    // Pasang hook log SEBELUM log lain — biar log paling awal juga
+    // ke-capture ke web viewer (lihat weblog_sys.h buat penjelasan
+    // kenapa ini ada: 1 kabel USB-C aja, kepake buat ngetes).
+    weblog_hook_install();
+
     ESP_LOGI("JirStore", "Booting...");
     wifi_init();
     xTaskCreate(task_display, "Display", 8192, NULL, 1, NULL);

@@ -2,6 +2,7 @@
 // Scan, connect (open/password), disconnect
 
 #include "wifi_sys.h"
+#include "weblog_sys.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -155,6 +156,12 @@ static void _wifi_event_handler(void *arg, esp_event_base_t base,
 
             if (s_evt_grp) xEventGroupSetBits(s_evt_grp, BIT_CONNECTED);
             ESP_LOGI(TAG, "Konek! IP: %s", s_ip_str);
+
+            // Nyalain web log viewer begitu dapet IP — dari sini log bisa
+            // dipantau lewat browser (http://<ip>/), gak perlu kabel USB.
+            // Aman dipanggil berkali-kali (no-op kalau udah jalan), jadi
+            // reconnect WiFi pun otomatis ke-cover lagi.
+            weblog_start();
         }
     }
 }
