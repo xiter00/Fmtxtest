@@ -133,6 +133,8 @@ bool resp_bool(HttpResp *resp, const char *key);
  */
 cJSON *resp_obj(HttpResp *resp, const char *key);
 
+
+const char *obj_str(cJSON *obj, const char *key);
 /**
  * fetch_free(m)  →  wajib dipanggil setelah selesai, biar ga memory leak
  */
