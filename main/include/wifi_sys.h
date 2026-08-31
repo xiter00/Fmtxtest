@@ -5,6 +5,7 @@
 #define WIFI_SYS_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 // ============================================================
 // KONFIGURASI
