@@ -290,7 +290,21 @@ cJSON *resp_obj(HttpResp *resp, const char *key) {
     if (!resp || !resp->_json || !key) return NULL;
     return cJSON_GetObjectItem(resp->_json, key);
 }
-
+// ============================================================
+// PUBLIC: baca string dari cJSON* MANAPUN, bukan cuma top-level
+// response. Dibutuhin buat baca field yang NESTED di dalam objek,
+// misal "data" pada response kayak:
+//   {"status": true, "data": {"status": "available", ...}}
+// resp_str() cuma bisa baca top-level ("status" yg true itu),
+// obj_str() bisa baca field di dalem objek manapun (misal
+// obj_str(resp_obj(m, "data"), "status") buat ambil "available").
+// ============================================================
+const char *obj_str(cJSON *obj, const char *key) {
+    if (!obj || !key) return NULL;
+    cJSON *item = cJSON_GetObjectItem(obj, key);
+    if (!item || !cJSON_IsString(item)) return NULL;
+    return item->valuestring;
+}
 // ============================================================
 // PUBLIC: Bebasin memory — WAJIB dipanggil setelah selesai
 // ============================================================
