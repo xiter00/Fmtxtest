@@ -52,7 +52,25 @@ jobs:
       - name: Ambil cert & buat header
         run: |
           mkdir -p main/include
-          echo | openssl s_client -connect atlantich2h.com:443 -servername atlantich2h.com 2>/dev/null | openssl x509 -outform PEM > cert.pem
+
+          # Ambil FULL chain (leaf + intermediate) pake -showcerts,
+          # bukan cuma leaf. Leaf doang gak bisa dipake ESP32 buat
+          # verify server (leaf bukan CA), makanya kemarin mbedtls
+          # error -0x2700 (X509_CERT_VERIFY_FAILED).
+          echo | openssl s_client -connect atlantich2h.com:443 -servername atlantich2h.com -showcerts 2>/dev/null \
+            | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' > chain.pem
+
+          # Ambil intermediate CA (WE1) langsung dari Google, ini yang
+          # nandatangan cert atlantich2h.com. Ini bagian PALING PENTING:
+          # tanpa ini, chain-nya putus dan verify tetep gagal walau kita
+          # udah showcerts.
+          curl -sL http://i.pki.goog/we1.crt -o we1.der
+          openssl x509 -inform DER -in we1.der -outform PEM > we1.pem
+
+          # Gabung: leaf (dari showcerts) + intermediate WE1.
+          # Kalau showcerts kebetulan udah include WE1 juga, gak masalah,
+          # dobel cert PEM tetep valid buat mbedtls.
+          cat chain.pem we1.pem > cert.pem
 
           if [ ! -s cert.pem ]; then
             echo "❌ Gagal ambil sertifikat, cert.pem kosong"
