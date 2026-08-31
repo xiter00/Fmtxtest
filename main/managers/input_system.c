@@ -121,8 +121,7 @@ if (appMode == 5) {
     // OK: tap = tambah karakter | tahan ≥450ms = SUBMIT & connect (gak nambah
     // karakter nyasar pas submit — ini yang bikin password ke-input salah)
     else if (appMode == 14) {
-        static const char CS_WIFI[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@ _-.#!";
-        const int csWLen = 69;
+        const int csWLen = CS_WIFI_LEN;   // Sekarang dari globals.h, sinkron sama display_system.c
 
         static uint32_t tHold14   = 0;
         static bool     hold14    = false;
@@ -443,14 +442,9 @@ void handleStoreInput(int btn) {
     // < (2x)   = BATAL — hapus semua, kembali ke field list
     // --------------------------------------------------
     else if (appMode == 5) {
-        static const char CS_ANGKA[] = "0123456789";
-        // Urutan dioptimasi biar rata-rata pencet lebih dikit buat email/username:
-        // huruf kecil dulu (paling sering) → angka → @ . (wajib ada di email,
-        // ditaro di depan biar gak perlu muter jauh) → _ - → huruf besar
-        // (paling jarang dipake di email/ID) → sisa simbol.
-        static const char CS_HURUF[] = "abcdefghijklmnopqrstuvwxyz0123456789@._-ABCDEFGHIJKLMNOPQRSTUVWXYZ #";
+        // Charset dari globals.h (satu sumber, sinkron sama display_system.c)
         const char *cs    = inputAngka ? CS_ANGKA : CS_HURUF;
-        int         csLen = inputAngka ? 10 : 68;
+        int         csLen = inputAngka ? CS_ANGKA_LEN : CS_HURUF_LEN;
 
         if (btn == BTN_RIGHT) {
             charIdx = (charIdx + 1) % csLen;

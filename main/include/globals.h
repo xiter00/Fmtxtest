@@ -83,4 +83,25 @@ extern int bintangY[5];
 extern bool itemtersedia;
 extern bool checkstatus;
 extern const char* apiKeyH2H;
+
+// ==========================================================
+// KEYBOARD CHARSETS — SATU SUMBER (dipakai input_system.c
+// buat logic DAN display_system.c buat gambar layar).
+// Dulu tiap file punya salinan sendiri2 yang gak sinkron
+// (charset yang KELIATAN di layar beda sama yang KEPILIH pas
+// OK ditekan) — sekarang cuma ada 1 definisi biar gak nyimpang lagi.
+// Urutan karakter dioptimasi biar rata-rata pencet tombol > lebih
+// dikit buat kasus yang paling sering dipakai:
+//   CS_HURUF -> huruf kecil dulu, baru angka, simbol email, huruf besar
+//               (buat ID/username/email di layar 5)
+//   CS_WIFI  -> huruf kecil + angka dulu (paling umum di password wifi),
+//               baru simbol, huruf besar paling belakang (paling jarang)
+// ==========================================================
+extern const char CS_ANGKA[];
+extern const char CS_HURUF[];
+extern const char CS_WIFI[];
+extern const int  CS_ANGKA_LEN;
+extern const int  CS_HURUF_LEN;
+extern const int  CS_WIFI_LEN;
+
 #endif // GLOBALS_H

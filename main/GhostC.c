@@ -47,6 +47,14 @@ bool itemtersedia = false;
 bool checkstatus = false;
 const char* apiKeyH2H = "n69ZrluCowPuGGnJ9nP8cQHlHAp21WHGKE1O66eHz3BVEUYbwPPmXgLevypIOLsNezoC3vsLo5IOCkKsPFKs5tUCA1t4TjYiiU3f";
 
+// --- KEYBOARD CHARSETS (satu sumber buat input_system.c & display_system.c) ---
+const char CS_ANGKA[] = "0123456789";
+const char CS_HURUF[] = "abcdefghijklmnopqrstuvwxyz0123456789@._-ABCDEFGHIJKLMNOPQRSTUVWXYZ #";
+const char CS_WIFI[]  = "abcdefghijklmnopqrstuvwxyz0123456789@_-.#! ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const int  CS_ANGKA_LEN = sizeof(CS_ANGKA) - 1;
+const int  CS_HURUF_LEN = sizeof(CS_HURUF) - 1;
+const int  CS_WIFI_LEN  = sizeof(CS_WIFI)  - 1;
+
 void app_main(void) {
     ESP_LOGI("JirStore", "Booting...");
     wifi_init();

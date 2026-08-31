@@ -432,6 +432,7 @@ typedef struct {
 } CekProdukParam;
 
 static volatile bool s_cekProdukJalan = false;
+static const char *TAG_PRODUK = "cek_produk";
 
 static void task_cek_produk(void *param) {
     CekProdukParam *cp = (CekProdukParam *)param;
@@ -448,12 +449,22 @@ static void task_cek_produk(void *param) {
     };
 
     HttpResp *res = http_request(&req);
-
     bool tersedia = false;
-    if (res && res->ok) {
-        const char *status = resp_str(res, "status");
-        tersedia = (status != NULL && strcmp(status, "available") == 0);
+
+    if (!res) {
+        ESP_LOGE(TAG_PRODUK, "kode=%s: request gagal total (cek koneksi WiFi / server)", cp->kode);
+    } else {
+        // Log ini yang paling penting: kalau "Produk Tidak Tersedia" muncul lagi,
+        // buka Serial Monitor dan copy baris ini, itu yang dipake buat diagnosa
+        // beneran (bukan nebak-nebak lagi).
+        ESP_LOGI(TAG_PRODUK, "kode=%s http_status=%d ok=%d body=%s",
+                 cp->kode, res->status, res->ok, res->body ? res->body : "(kosong)");
+cJSON *data = resp_obj(res, "data");
+const char *status = obj_str(data, "status");
+tersedia = (status != NULL && strcmp(status, "available") == 0);
+        
     }
+
     if (res) fetch_free(res);
 
     itemtersedia     = tersedia;
@@ -462,6 +473,45 @@ static void task_cek_produk(void *param) {
 
     free(cp);
     vTaskDelete(NULL);
+}
+
+// ==========================================================
+// CAROUSEL KARAKTER — dipake bareng di LAYAR 5 (input ID/huruf)
+// & LAYAR 14 (password wifi).
+//
+// Nunjukkin karakter SEKARANG + 2 karakter SEBELUM & 2 SESUDAHNYA
+// (wrap-around), biar user bisa liat huruf apa yang bakal DATENG
+// sebelum nge-scroll sampe kesitu — gak perlu nebak2 lagi kayak
+// model 1-karakter yang lama.
+//
+//   [prev2] [prev1] [ SEKARANG ] [next1] [next2]
+//
+// id     = layar OLED target
+// yBox   = y posisi baris (karakter SEKARANG digambar sedikit lebih
+//          gede lewat kotak highlight, yang lain cuma teks biasa)
+// cs/len = charset aktif & panjangnya
+// ci     = index karakter yang lagi kepilih (sudah di-mod ke csLen)
+// ==========================================================
+static void drawCharCarousel(uint8_t id, uint8_t yBox, const char *cs, int len, int ci) {
+    // Jarak antar slot 13px (muat 5 slot dari x=60 s/d x=112, sisa buat margin)
+    const int slotW = 13;
+    const int xCenter = 92; // slot tengah (karakter SEKARANG)
+
+    int offs[5]   = { -2, -1, 0, 1, 2 };
+    for (int i = 0; i < 5; i++) {
+        int idx = ((ci + offs[i]) % len + len) % len; // wrap-around aman buat negatif
+        int x   = xCenter + offs[i] * slotW;
+        char s[2] = { cs[idx], '\0' };
+
+        if (offs[i] == 0) {
+            // Karakter aktif — kotak highlight solid, teks gede-gedean kesan
+            ssd1306_fill_rectangle(id, x - 7, yBox - 1, 16, 16, WHITE);
+            ssd1306_draw_string_adafruit(id, x - 2, yBox + 3, s, BLACK, WHITE);
+        } else {
+            // Preview — teks biasa, sedikit lebih redup kesannya krn gak dikotakin
+            ssd1306_draw_string_adafruit(id, x - 2, yBox + 3, s, WHITE, BLACK);
+        }
+    }
 }
 
 // ==========================================================
@@ -633,11 +683,12 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
     // < saat buffer kosong      = GANTI MODE (ANGKA↔HURUF)
     // ======================================================
     else if (appMode == 5) {
-        // Pilih charset sesuai mode
-        static const char CS_ANGKA[] = "0123456789";
-        static const char CS_HURUF[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@ _-.#";
+        // Charset dari globals.h (satu sumber, sinkron sama input_system.c —
+        // dulu di sini ada salinan charset sendiri yang KETINGGALAN dan beda
+        // panjang/urutan dari yang dipakai buat nentuin karakter kepilih,
+        // jadi apa yang KELIATAN di layar bisa beda sama yang KEPILIH pas OK)
         const char *cs    = inputAngka ? CS_ANGKA : CS_HURUF;
-        int         csLen = inputAngka ? 10 : 59;
+        int         csLen = inputAngka ? CS_ANGKA_LEN : CS_HURUF_LEN;
         int         ci    = charIdx % csLen; // Safety clamp
 
         // Header: nama field
@@ -665,14 +716,9 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
             ssd1306_draw_string_adafruit(0, 39, 24, "HURUF", BLACK, WHITE);
         }
 
-        // Kotak karakter aktif (tengah-kanan)
-        ssd1306_fill_rectangle(0, 91, 22, 20, 20, WHITE);
-        char csShow[2] = { cs[ci], '\0' };
-        ssd1306_draw_string_adafruit(0, 98, 30, csShow, BLACK, WHITE);
-
-        // Panah kiri-kanan
-        ssd1306_draw_string_adafruit(0, 82, 28, "<", WHITE, BLACK);
-        ssd1306_draw_string_adafruit(0, 114, 28, ">", WHITE, BLACK);
+        // Carousel: [prev2][prev1][SEKARANG][next1][next2] — bisa keliatan
+        // huruf yang mau dateng sebelum beneran discroll ke situ
+        drawCharCarousel(0, 26, cs, csLen, ci);
 
         // Posisi karakter (kanan atas)
         snprintf(buf, sizeof(buf), "%d/%d", ci+1, csLen);
@@ -886,8 +932,8 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
     // LAYAR 14: Input Password WiFi (keyboard)
     // ======================================================
     else if (appMode == 14) {
-        static const char CS_WIFI[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@ _-.#!";
-        int csLen14 = 69;
+        // Charset dari globals.h — sama persis yang dipakai input_system.c
+        int csLen14 = CS_WIFI_LEN;
         int ci14    = charIdx % csLen14;
 
         ssd1306_clear(0);
@@ -902,12 +948,8 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 2, 12, masked, WHITE, BLACK);
         ssd1306_draw_hline(0, 0, 21, 128, WHITE);
 
-        // Kotak karakter
-        ssd1306_fill_rectangle(0, 91, 22, 20, 20, WHITE);
-        char csShow[2] = { CS_WIFI[ci14], '\0' };
-        ssd1306_draw_string_adafruit(0, 98, 30, csShow, BLACK, WHITE);
-        ssd1306_draw_string_adafruit(0, 82, 28, "<", WHITE, BLACK);
-        ssd1306_draw_string_adafruit(0, 114, 28, ">", WHITE, BLACK);
+        // Carousel: [prev2][prev1][SEKARANG][next1][next2]
+        drawCharCarousel(0, 26, CS_WIFI, csLen14, ci14);
 
         char posStr[10];
         snprintf(posStr, sizeof(posStr), "%d/%d", ci14+1, csLen14);
