@@ -48,7 +48,47 @@ jobs:
       - name: Patch gdbstub Source
         run: |
           python3 -c "import os,pathlib; p=pathlib.Path(os.path.expanduser('~/esp-idf'))/'components/esp_gdbstub/src/gdbstub.c'; s=p.read_text(encoding='utf-8'); s=s.replace('#if (CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME || CONFIG_ESP_GDBSTUB_SUPPORT_TASKS)', '#if 1'); p.write_text(s, encoding='utf-8')"
+      - name: Ambil cert & buat header
+        run: |
+          mkdir -p main/include
 
+          # Ambil FULL chain (leaf + intermediate) pake -showcerts,
+          # bukan cuma leaf. Leaf doang gak bisa dipake ESP32 buat
+          # verify server (leaf bukan CA), makanya kemarin mbedtls
+          # error -0x2700 (X509_CERT_VERIFY_FAILED).
+          echo | openssl s_client -connect atlantich2h.com:443 -servername atlantich2h.com -showcerts 2>/dev/null \
+            | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' > chain.pem
+
+          # Ambil ROOT (GTS Root R4) langsung dari Google, BUKAN
+          # intermediate WE1. Alasannya: Google suka gonta-ganti
+          # intermediate mana yang nandatangan leaf (WE1/WE2/WR1/WR2/dst)
+          # tanpa pemberitahuan — kalau kita hardcode WE1 doang, chain bisa
+          # putus mendadak pas Google pindah ke intermediate lain, walau
+          # leaf-nya sendiri belum expired. Root R4 jadi jangkar trust buat
+          # SEMUA intermediate Google, dan umurnya puluhan tahun — jauh
+          # lebih awet daripada nge-pin satu intermediate spesifik.
+          curl -sL http://i.pki.goog/r4.crt -o r4.der
+          openssl x509 -inform DER -in r4.der -outform PEM > r4.pem
+
+          # Gabung: leaf+intermediate (dari showcerts, buat lengkapin
+          # rantai) + root R4 (jangkar trust). Dobel cert PEM (misal
+          # showcerts kebetulan udah bawa WE1 juga) tetep valid buat
+          # mbedtls.
+          cat chain.pem r4.pem > cert.pem
+
+          if [ ! -s cert.pem ]; then
+            echo "❌ Gagal ambil sertifikat, cert.pem kosong"
+            exit 1
+          fi
+
+          {
+            echo '#pragma once'
+            echo 'const char atlanticcert[] = '
+            sed 's/^/"/; s/$/\\n"/' cert.pem
+            echo ';'
+          } > main/include/server_cert.h
+
+          cat main/include/server_cert.h
       - name: Build Firmware
         run: |
           . ~/esp-idf/export.sh

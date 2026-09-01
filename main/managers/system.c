@@ -19,6 +19,7 @@
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "wifi_sys.h"
+#include "server_cert.h"   // atlanticcert[]
 
 static const char *TAG = "system";
 static bool s_time_synced = false;
@@ -176,7 +177,7 @@ static HttpResp *_do_request(
     .timeout_ms     = HTTP_TIMEOUT_MS,
     .buffer_size    = 512,
     .buffer_size_tx = 512,
-    .crt_bundle_attach = esp_crt_bundle_attach, // Percaya ke daftar CA resmi
+    .cert_pem     = atlanticcert, // Percaya ke daftar CA resmi
                                                  // (kayak browser), bukan 1
                                                  // sertifikat spesifik yang
                                                  // bisa expired/rotate
