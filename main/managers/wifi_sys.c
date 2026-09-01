@@ -89,6 +89,49 @@ static EventGroupHandle_t s_evt_grp = NULL;
 #define BIT_FAILED     BIT1
 
 // ============================================================
+// SAVE JOB — dijalanin di task TERPISAH, BUKAN langsung di
+// _wifi_event_handler.
+//
+// Penyebab crash sebelumnya BUKAN cuma soal blob gede di stack —
+// nvs_open/nvs_get_blob/nvs_commit sendiri manggil operasi flash
+// (lewat ROM function) yang butuh stack lumayan banyak di balik
+// layar. Semua itu kejalanin di task "sys_evt" bawaan ESP-IDF,
+// yang stack-nya cuma ~2.8KB dan emang gak didesain buat kerjaan
+// flash write — makanya masih overflow (SP kepentok di bawah
+// Stack bounds) walau blob udah dipindah ke heap.
+//
+// Solusinya: begitu dapet IP, event handler cuma nyiapin data terus
+// spawn task baru dengan stack gede (4096) buat beneran ngerjain
+// _saved_load/_saved_persist. Event handler sendiri jadi ringan lagi.
+// ============================================================
+typedef struct {
+    char ssid[33];
+    char pass[64];
+} _SaveJob;
+
+static void _saved_upsert_task(void *arg) {
+    _SaveJob *job = (_SaveJob *)arg;
+    wifi_saved_upsert(job->ssid, job->pass);
+    free(job);
+    vTaskDelete(NULL);
+}
+
+static void _saved_upsert_async(const char *ssid, const char *pass) {
+    _SaveJob *job = malloc(sizeof(_SaveJob));
+    if (!job) return;
+    strncpy(job->ssid, ssid, sizeof(job->ssid) - 1);
+    job->ssid[sizeof(job->ssid) - 1] = '\0';
+    strncpy(job->pass, pass, sizeof(job->pass) - 1);
+    job->pass[sizeof(job->pass) - 1] = '\0';
+
+    if (xTaskCreate(_saved_upsert_task, "wifi_save", 4096, job, 5, NULL) != pdPASS) {
+        // Gagal bikin task (kehabisan memori dsb) — jangan sampe job
+        // nyangkut, mending gak kesimpen kali ini daripada leak.
+        free(job);
+    }
+}
+
+// ============================================================
 // EVENT HANDLER
 // ============================================================
 static void _wifi_event_handler(void *arg, esp_event_base_t base,
@@ -181,7 +224,7 @@ static void _wifi_event_handler(void *arg, esp_event_base_t base,
             // mindahin ke posisi "paling baru dipake"). Jaringan open
             // (wifiPassBuf kosong) sengaja gak disimpen, gak ada gunanya.
             if (wifiPassBuf[0] != '\0') {
-                wifi_saved_upsert(wifiConnectedSSID, wifiPassBuf);
+                _saved_upsert_async(wifiConnectedSSID, wifiPassBuf);
             }
 
             if (s_evt_grp) xEventGroupSetBits(s_evt_grp, BIT_CONNECTED);
