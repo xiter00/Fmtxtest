@@ -925,7 +925,6 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
             }
             ssd1306_draw_string_adafruit(0, 0, 56, "< Batal  OK Pilih", WHITE, BLACK);
         }
-        ssd1306_refresh(0, true);
     }
 
     // ======================================================
@@ -971,7 +970,6 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 90, 47, posStr, WHITE, BLACK);
 
         ssd1306_draw_string_adafruit(0, 0, 56, "OK=+  TahanOK=Connect", WHITE, BLACK);
-        ssd1306_refresh(0, true);
     }
 
     // ======================================================
@@ -983,7 +981,6 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 2, 1, "Menghubungkan...", BLACK, WHITE);
         ssd1306_draw_string_adafruit(0, 4, 18, wifiList[wifiKursor].ssid, WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 10, 40, "Mohon tunggu...", WHITE, BLACK);
-        ssd1306_refresh(0, true);
     }
 
     // ======================================================
@@ -997,7 +994,6 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         const char *ip = wifi_get_ip();
         ssd1306_draw_string_adafruit(0, 4, 30, ip ? ip : "-", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 0, 54, "< Kembali", WHITE, BLACK);
-        ssd1306_refresh(0, true);
     }
 
     // ======================================================
@@ -1010,7 +1006,6 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 10, 18, wifiList[wifiKursor].ssid, WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 4, 34, "Salah password?", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 0, 54, "< Coba lagi", WHITE, BLACK);
-        ssd1306_refresh(0, true);
     }
 
     // ======================================================
@@ -1040,7 +1035,6 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
             }
             ssd1306_draw_string_adafruit(0, 0, 56, "< Kembali OK Lihat", WHITE, BLACK);
         }
-        ssd1306_refresh(0, true);
     }
 
     // ======================================================
@@ -1063,14 +1057,16 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 2, 46, tmp, WHITE, BLACK);
 
         ssd1306_draw_string_adafruit(0, 0, 56, "<Kembali  OK=Hapus", WHITE, BLACK);
-        ssd1306_refresh(0, true);
     }
 
-    // Refresh wajib buat LAYAR TOKO (2,3,4,5,6,9-12) — cabang-cabang itu
-    // gak punya ssd1306_refresh() sendiri, jadi HARUS ada ini di sini,
-    // kalau gak, gambar cuma nyangkut di framebuffer & gak pernah nongol
-    // di OLED (keliatan kayak "freeze" padahal state di baliknya jalan normal).
-    // Buat layar 13-17 ini jadi refresh kedua — aman, cuma dikit boros.
+    // Satu-satunya ssd1306_refresh buat SEMUA layar toko (2-6, 9-19).
+    // Tiap cabang appMode di atas cukup gambar ke framebuffer aja, refresh
+    // ke OLED (yang paling lambat, ngirim seluruh buffer lewat I2C)
+    // dilakuin sekali di sini. Dulu layar 13-19 (WiFi) punya refresh
+    // sendiri-sendiri DI DALEM cabangnya + kena refresh ini lagi = 2x per
+    // loop, bikin 1 putaran for(;;) molor dari 33ms, dan itu yang bikin
+    // auto-repeat tombol kanan di layar password WiFi (14) kerasa lebih
+    // lambat/patah-patah dibanding layar input ID (5).
     ssd1306_refresh(0, true);
 }
 

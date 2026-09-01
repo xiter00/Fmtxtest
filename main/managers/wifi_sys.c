@@ -366,15 +366,26 @@ static void _saved_load(void) {
     nvs_handle_t h;
     if (nvs_open(WIFI_SAVED_NVS_NS, NVS_READONLY, &h) != ESP_OK) return;
 
-    WifiSavedBlob blob;
-    size_t len = sizeof(blob);
-    if (nvs_get_blob(h, WIFI_SAVED_NVS_KEY, &blob, &len) == ESP_OK && len == sizeof(blob)) {
-        int c = blob.count;
+    // WifiSavedBlob ~2KB — WAJIB di heap, bukan di stack. Fungsi ini
+    // dipanggil dari _wifi_event_handler yang jalan di task "sys_evt"
+    // punya ESP-IDF sendiri, stack-nya kecil (~2-3KB default) dan
+    // dipakai bareng buat semua event WiFi/IP lain juga. Taro blob
+    // segede ini sebagai local variable = stack overflow (Stack
+    // protection fault) begitu handler kepanggil.
+    WifiSavedBlob *blob = malloc(sizeof(WifiSavedBlob));
+    if (!blob) {
+        nvs_close(h);
+        return;
+    }
+    size_t len = sizeof(*blob);
+    if (nvs_get_blob(h, WIFI_SAVED_NVS_KEY, blob, &len) == ESP_OK && len == sizeof(*blob)) {
+        int c = blob->count;
         if (c < 0) c = 0;
         if (c > WIFI_SAVED_MAX) c = WIFI_SAVED_MAX;
         s_saved_count = c;
-        memcpy(s_saved, blob.entries, sizeof(WifiSavedEntry) * (size_t)c);
+        memcpy(s_saved, blob->entries, sizeof(WifiSavedEntry) * (size_t)c);
     }
+    free(blob);
     nvs_close(h);
 }
 
@@ -384,13 +395,19 @@ static void _saved_persist(void) {
         ESP_LOGE(TAG, "Gagal buka NVS buat simpan saved wifi");
         return;
     }
-    WifiSavedBlob blob;
-    memset(&blob, 0, sizeof(blob));
-    blob.count = s_saved_count;
-    memcpy(blob.entries, s_saved, sizeof(WifiSavedEntry) * (size_t)s_saved_count);
+    // Sama kayak _saved_load — WAJIB di heap, jangan di stack task sys_evt.
+    WifiSavedBlob *blob = malloc(sizeof(WifiSavedBlob));
+    if (!blob) {
+        nvs_close(h);
+        return;
+    }
+    memset(blob, 0, sizeof(*blob));
+    blob->count = s_saved_count;
+    memcpy(blob->entries, s_saved, sizeof(WifiSavedEntry) * (size_t)s_saved_count);
 
-    nvs_set_blob(h, WIFI_SAVED_NVS_KEY, &blob, sizeof(blob));
+    nvs_set_blob(h, WIFI_SAVED_NVS_KEY, blob, sizeof(*blob));
     nvs_commit(h);
+    free(blob);
     nvs_close(h);
 }
 
