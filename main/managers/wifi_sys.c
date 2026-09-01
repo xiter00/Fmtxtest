@@ -18,6 +18,7 @@
 #include "nvs_flash.h"
 #include "esp_netif_sntp.h"
 #include "esp_sntp.h"
+#include "lwip/ip_addr.h"
 
 static const char *TAG = "wifi_sys";
 
@@ -145,6 +146,23 @@ static void _wifi_event_handler(void *arg, esp_event_base_t base,
         if (id == IP_EVENT_STA_GOT_IP) {
             ip_event_got_ip_t *ev = (ip_event_got_ip_t *)data;
             snprintf(s_ip_str, sizeof(s_ip_str), IPSTR, IP2STR(&ev->ip_info.ip));
+
+            // Paksa pakai DNS publik (8.8.8.8 / 1.1.1.1) — beberapa AP/router
+            // kasih DNS server dari DHCP yang gak bisa resolve domain luar,
+            // jadinya getaddrinfo() gagal walaupun WiFi "connected". Ini
+            // override manual biar DNS resolution gak gantung ke router.
+            esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+            if (netif) {
+                esp_netif_dns_info_t dns_main = {0};
+                dns_main.ip.type = ESP_IPADDR_TYPE_V4;
+                dns_main.ip.u_addr.ip4.addr = ipaddr_addr("8.8.8.8");
+                esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns_main);
+
+                esp_netif_dns_info_t dns_backup = {0};
+                dns_backup.ip.type = ESP_IPADDR_TYPE_V4;
+                dns_backup.ip.u_addr.ip4.addr = ipaddr_addr("1.1.1.1");
+                esp_netif_set_dns_info(netif, ESP_NETIF_DNS_BACKUP, &dns_backup);
+            }
 
             wifiStatus = WIFI_STATUS_CONNECTED;
 

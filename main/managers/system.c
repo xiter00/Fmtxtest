@@ -14,6 +14,8 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_netif.h"
+#include "esp_heap_caps.h"
 #include "cJSON.h"
 #include "server_cert.h"
 #include "wifi_sys.h"
@@ -112,6 +114,37 @@ static HttpResp *_do_request(
 
     ESP_LOGI(TAG, "=== MULAI REQUEST === url=%s method=%d body=%s",
              url, method, body ? body : "(tidak ada body)");
+
+    // DIAGNOSTIC: cetak DNS server yang BENERAN dipegang esp-netif saat
+    // ini juga, langsung dari state internal — bukan tebakan/asumsi.
+    // Kalau ini nyetak 0.0.0.0 pas request gagal, itu bukti pasti DNS
+    // server-nya kosong di device (baru itu baru boleh dicurigain ke
+    // arah situ). Kalau bukan 0.0.0.0 tapi tetep gagal, berarti DNS
+    // server-nya ADA tapi query-nya yang gagal/timeout — beda akar
+    // masalah, dan itu ngarah ke sisi lwip/task timing, bukan config.
+    {
+        esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        if (netif) {
+            esp_netif_dns_info_t d;
+            if (esp_netif_get_dns_info(netif, ESP_NETIF_DNS_MAIN, &d) == ESP_OK) {
+                ESP_LOGI(TAG, "DIAG dns_main=" IPSTR, IP2STR(&d.ip.u_addr.ip4));
+            }
+            if (esp_netif_get_dns_info(netif, ESP_NETIF_DNS_BACKUP, &d) == ESP_OK) {
+                ESP_LOGI(TAG, "DIAG dns_backup=" IPSTR, IP2STR(&d.ip.u_addr.ip4));
+            }
+            esp_netif_ip_info_t ip_info;
+            if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+                ESP_LOGI(TAG, "DIAG ip=" IPSTR " gw=" IPSTR,
+                         IP2STR(&ip_info.ip), IP2STR(&ip_info.gw));
+            }
+        } else {
+            ESP_LOGE(TAG, "DIAG netif WIFI_STA_DEF gak ketemu");
+        }
+        ESP_LOGI(TAG, "DIAG heap_free=%lu heap_min=%lu",
+                 (unsigned long)esp_get_free_heap_size(),
+                 (unsigned long)esp_get_minimum_free_heap_size());
+    }
+
 
     // Jam device HARUS udah sync sebelum request HTTPS pertama, kalau
     // enggak verifikasi sertifikat server bakal gagal terus (-0x2700)

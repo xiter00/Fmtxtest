@@ -220,6 +220,11 @@ void weblog_start(void) {
     config.server_port      = WEBLOG_PORT;
     config.lru_purge_enable = true;
     config.max_uri_handlers = 6;
+    // Dibatasin biar gak ngabisin jatah socket global (dipakai bareng
+    // sama esp_http_client buat ke atlantich2h.com + resolver DNS).
+    // Browser polling /log.txt tiap detik bisa numpuk beberapa koneksi
+    // kalau gak dibatasi, dan bikin request lain kehabisan socket.
+    config.max_open_sockets = 3;
     // Stack dinaikin dikit — snapshot log bisa lumayan gede (belasan KB)
     config.stack_size = 6144;
 
