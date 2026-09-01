@@ -42,6 +42,10 @@ extern char    wifiPassBuf[64];        // Buffer password yang diketik
 extern int     wifiStatus;             // WIFI_STATUS_xxx
 extern char    wifiConnectedSSID[33];  // SSID yang lagi konek
 
+// --- SAVED WIFI (menu Settings > Saved WiFi) ---
+extern int     savedWifiKursor;        // Kursor di list saved wifi
+extern int     savedWifiScroll;        // Scroll offset list saved wifi
+
 // ============================================================
 // FUNGSI PUBLIK
 // ============================================================
@@ -73,5 +77,31 @@ int wifi_rssi_bar(int rssi);
 // sekali sebelum request HTTPS pertama, kalau enggak sertifikat server
 // bakal gagal diverifikasi karena jam device belum bener (-0x2700).
 bool wifi_wait_time_synced(uint32_t timeout_ms);
+
+// ============================================================
+// SAVED WIFI — password per SSID, disimpan permanen di NVS.
+// Dibatasin WIFI_SAVED_MAX biar ukurannya kepredik & gak bisa "kepenuhan"
+// device: total cuma ~2KB flash walau semua slot kepake, jauh di bawah
+// kapasitas partisi NVS. Kalau nambah pas udah penuh, entry PALING LAMA
+// gak dipake (bukan paling lama DISIMPAN) otomatis kebuang duluan (LRU).
+// ============================================================
+#define WIFI_SAVED_MAX 20
+
+// Simpan/update password buat SSID ini. Kalau SSID udah ada, password-nya
+// ditimpa & posisinya dipindah jadi "paling baru dipake". Dipanggil
+// otomatis tiap kali berhasil konek ke jaringan berpassword.
+void wifi_saved_upsert(const char *ssid, const char *pass);
+
+// Cari password tersimpan buat SSID ini. Return true + isi outBuf kalau
+// ketemu, false kalau belum pernah disimpan.
+bool wifi_saved_lookup(const char *ssid, char *outBuf, size_t outLen);
+
+// Hapus 1 entry saved wifi berdasar index (0-based, ikutin urutan
+// wifi_saved_get_ssid/get_pass).
+void wifi_saved_delete(int idx);
+
+int         wifi_saved_count(void);
+const char *wifi_saved_get_ssid(int idx);
+const char *wifi_saved_get_pass(int idx);
 
 #endif // WIFI_SYS_H

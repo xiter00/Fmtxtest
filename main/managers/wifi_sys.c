@@ -16,6 +16,7 @@
 #include "esp_netif.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 #include "esp_netif_sntp.h"
 #include "esp_sntp.h"
 #include "lwip/ip_addr.h"
@@ -74,6 +75,8 @@ int     wifiScroll             = 0;
 char    wifiPassBuf[64]        = {0};
 int     wifiStatus             = WIFI_STATUS_IDLE;
 char    wifiConnectedSSID[33]  = {0};
+int     savedWifiKursor        = 0;
+int     savedWifiScroll        = 0;
 
 // ============================================================
 // INTERNAL
@@ -170,6 +173,15 @@ static void _wifi_event_handler(void *arg, esp_event_base_t base,
             wifi_ap_record_t ap;
             if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
                 strncpy(wifiConnectedSSID, (char *)ap.ssid, 32);
+            }
+
+            // Berhasil konek pakai password → simpen/update ke Saved WiFi
+            // otomatis (baik itu password baru diketik atau auto-fill dari
+            // yang udah tersimpan sebelumnya — nulis ulang gapapa, cuma
+            // mindahin ke posisi "paling baru dipake"). Jaringan open
+            // (wifiPassBuf kosong) sengaja gak disimpen, gak ada gunanya.
+            if (wifiPassBuf[0] != '\0') {
+                wifi_saved_upsert(wifiConnectedSSID, wifiPassBuf);
             }
 
             if (s_evt_grp) xEventGroupSetBits(s_evt_grp, BIT_CONNECTED);
@@ -315,4 +327,141 @@ int wifi_rssi_bar(int rssi) {
     if (rssi >= -70) return 2;  // Sedang
     if (rssi >= -85) return 1;  // Lemah
     return 0;                    // Sangat lemah
+}
+
+// ============================================================
+// SAVED WIFI — password per SSID di NVS
+//
+// Disimpan sebagai SATU blob (bukan key per-SSID), soalnya NVS batesin
+// nama key max 15 karakter sedangkan SSID bisa sampe 32 karakter — gak
+// muat kalau dipake langsung jadi nama key. Blob-nya sendiri ukurannya
+// TETAP (WIFI_SAVED_MAX slot), jadi cache di RAM & file di flash dua2nya
+// gak akan pernah "kepenuhan" gak kekontrol walau user gonta-ganti WiFi
+// terus — begitu nyampe limit, entry paling lama gak dipake yang
+// otomatis kegusur (LRU), bukan device jadi penuh/error.
+// ============================================================
+typedef struct {
+    char ssid[33];
+    char pass[64];
+} WifiSavedEntry;
+
+typedef struct {
+    int32_t        count;
+    WifiSavedEntry entries[WIFI_SAVED_MAX];
+} WifiSavedBlob;
+
+#define WIFI_SAVED_NVS_NS  "wifisaved"
+#define WIFI_SAVED_NVS_KEY "list"
+
+static WifiSavedEntry s_saved[WIFI_SAVED_MAX];
+static int            s_saved_count  = 0;
+static bool           s_saved_loaded = false;
+
+static void _saved_load(void) {
+    if (s_saved_loaded) return;
+    s_saved_loaded = true;
+    memset(s_saved, 0, sizeof(s_saved));
+    s_saved_count = 0;
+
+    nvs_handle_t h;
+    if (nvs_open(WIFI_SAVED_NVS_NS, NVS_READONLY, &h) != ESP_OK) return;
+
+    WifiSavedBlob blob;
+    size_t len = sizeof(blob);
+    if (nvs_get_blob(h, WIFI_SAVED_NVS_KEY, &blob, &len) == ESP_OK && len == sizeof(blob)) {
+        int c = blob.count;
+        if (c < 0) c = 0;
+        if (c > WIFI_SAVED_MAX) c = WIFI_SAVED_MAX;
+        s_saved_count = c;
+        memcpy(s_saved, blob.entries, sizeof(WifiSavedEntry) * (size_t)c);
+    }
+    nvs_close(h);
+}
+
+static void _saved_persist(void) {
+    nvs_handle_t h;
+    if (nvs_open(WIFI_SAVED_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+        ESP_LOGE(TAG, "Gagal buka NVS buat simpan saved wifi");
+        return;
+    }
+    WifiSavedBlob blob;
+    memset(&blob, 0, sizeof(blob));
+    blob.count = s_saved_count;
+    memcpy(blob.entries, s_saved, sizeof(WifiSavedEntry) * (size_t)s_saved_count);
+
+    nvs_set_blob(h, WIFI_SAVED_NVS_KEY, &blob, sizeof(blob));
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+void wifi_saved_upsert(const char *ssid, const char *pass) {
+    if (!ssid || !ssid[0] || !pass) return;
+    _saved_load();
+
+    int found = -1;
+    for (int i = 0; i < s_saved_count; i++) {
+        if (strncmp(s_saved[i].ssid, ssid, 32) == 0) { found = i; break; }
+    }
+
+    WifiSavedEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    strncpy(entry.ssid, ssid, 32);
+    strncpy(entry.pass, pass, 63);
+
+    if (found >= 0) {
+        // Udah ada — geser sisanya maju, taruh versi terbaru di paling
+        // akhir (posisi "paling baru dipake")
+        for (int i = found; i < s_saved_count - 1; i++) s_saved[i] = s_saved[i + 1];
+        s_saved[s_saved_count - 1] = entry;
+    } else if (s_saved_count < WIFI_SAVED_MAX) {
+        s_saved[s_saved_count] = entry;
+        s_saved_count++;
+    } else {
+        // Penuh — buang yang PALING LAMA gak dipake (index 0, paling
+        // jarang "disentuh ulang"), geser semua maju, taruh yang baru
+        // di akhir
+        for (int i = 0; i < WIFI_SAVED_MAX - 1; i++) s_saved[i] = s_saved[i + 1];
+        s_saved[WIFI_SAVED_MAX - 1] = entry;
+    }
+
+    _saved_persist();
+}
+
+bool wifi_saved_lookup(const char *ssid, char *outBuf, size_t outLen) {
+    if (!ssid || !outBuf || outLen == 0) return false;
+    _saved_load();
+    for (int i = 0; i < s_saved_count; i++) {
+        if (strncmp(s_saved[i].ssid, ssid, 32) == 0) {
+            strncpy(outBuf, s_saved[i].pass, outLen - 1);
+            outBuf[outLen - 1] = '\0';
+            return true;
+        }
+    }
+    return false;
+}
+
+void wifi_saved_delete(int idx) {
+    _saved_load();
+    if (idx < 0 || idx >= s_saved_count) return;
+    for (int i = idx; i < s_saved_count - 1; i++) s_saved[i] = s_saved[i + 1];
+    s_saved_count--;
+    memset(&s_saved[s_saved_count], 0, sizeof(WifiSavedEntry));
+    _saved_persist();
+}
+
+int wifi_saved_count(void) {
+    _saved_load();
+    return s_saved_count;
+}
+
+const char *wifi_saved_get_ssid(int idx) {
+    _saved_load();
+    if (idx < 0 || idx >= s_saved_count) return "";
+    return s_saved[idx].ssid;
+}
+
+const char *wifi_saved_get_pass(int idx) {
+    _saved_load();
+    if (idx < 0 || idx >= s_saved_count) return "";
+    return s_saved[idx].pass;
 }

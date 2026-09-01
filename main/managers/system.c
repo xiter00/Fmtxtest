@@ -17,7 +17,7 @@
 #include "esp_netif.h"
 #include "esp_heap_caps.h"
 #include "cJSON.h"
-#include "server_cert.h"
+#include "esp_crt_bundle.h"
 #include "wifi_sys.h"
 
 static const char *TAG = "system";
@@ -176,7 +176,10 @@ static HttpResp *_do_request(
     .timeout_ms     = HTTP_TIMEOUT_MS,
     .buffer_size    = 512,
     .buffer_size_tx = 512,
-    .cert_pem       = atlanticcert, 
+    .crt_bundle_attach = esp_crt_bundle_attach, // Percaya ke daftar CA resmi
+                                                 // (kayak browser), bukan 1
+                                                 // sertifikat spesifik yang
+                                                 // bisa expired/rotate
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);

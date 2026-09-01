@@ -13,7 +13,6 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "system.h"
-#include "server_cert.h"
 #define MAX_BINTANG 15
 
 // --- EXTERN ---
@@ -82,6 +81,7 @@ void task_display(void *pvParameters) {
             case 2: case 3: case 4: case 5:
             case 6: case 9: case 10: case 11: case 12:
             case 13: case 14: case 15: case 16: case 17:
+            case 18: case 19:
                 tampilkanStore(); break;
             case 7: renderAboutScreen();  break;
             case 8: renderRebootScreen(); break;
@@ -196,9 +196,9 @@ static const char *katHeader[] = {
 static const char *subGem[]   = {"Mobile Legends", "Free Fire", "PUBG Mobile", "Genshin Impact"};
 static const char *subPulsa[] = {"Telkomsel", "XL Axiata", "Indosat", "Tri"};
 static const char *subMoney[] = {"DANA", "GoPay", "OVO", "ShopeePay"};
-static const char *subSet[]   = {"Brightness", "About", "Reboot", "WiFi"};
+static const char *subSet[]   = {"Brightness", "About", "Reboot", "WiFi", "Saved WiFi"};
 
-const int totalSubKat[] = {4, 4, 4, 4};  // Diakses dari input_system
+const int totalSubKat[] = {4, 4, 4, 5};  // Diakses dari input_system
 
 static const unsigned char *ikonGem[]   = {iconSmall_scan, iconSmall_wifi, iconSmall_sniff, iconSmall_spam};
 static const unsigned char *ikonPulsa[] = {iconSmall_apple, iconSmall_android, iconSmall_conn, iconSmall_scan};
@@ -932,9 +932,11 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
     // LAYAR 14: Input Password WiFi (keyboard)
     // ======================================================
     else if (appMode == 14) {
-        // Charset dari globals.h — sama persis yang dipakai input_system.c
-        int csLen14 = CS_WIFI_LEN;
-        int ci14    = charIdx % csLen14;
+        // Sama persis kayak LAYAR 5: 2 mode keyboard (ANGKA/HURUF),
+        // charset dari globals.h — satu sumber sama input_system.c.
+        const char *cs14   = inputAngka ? CS_ANGKA : CS_HURUF;
+        int         csLen14 = inputAngka ? CS_ANGKA_LEN : CS_HURUF_LEN;
+        int         ci14    = charIdx % csLen14;
 
         ssd1306_clear(0);
         ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
@@ -948,14 +950,27 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 2, 12, masked, WHITE, BLACK);
         ssd1306_draw_hline(0, 0, 21, 128, WHITE);
 
+        // Badge MODE (kiri) — sama kayak LAYAR 5
+        if (inputAngka) {
+            ssd1306_fill_rectangle(0, 2, 23, 33, 10, WHITE);
+            ssd1306_draw_string_adafruit(0, 4, 24, "ANGKA", BLACK, WHITE);
+            ssd1306_draw_rectangle(0, 38, 23, 33, 10, WHITE);
+            ssd1306_draw_string_adafruit(0, 39, 24, "HURUF", WHITE, BLACK);
+        } else {
+            ssd1306_draw_rectangle(0, 2, 23, 33, 10, WHITE);
+            ssd1306_draw_string_adafruit(0, 4, 24, "ANGKA", WHITE, BLACK);
+            ssd1306_fill_rectangle(0, 38, 23, 33, 10, WHITE);
+            ssd1306_draw_string_adafruit(0, 39, 24, "HURUF", BLACK, WHITE);
+        }
+
         // Carousel: [prev2][prev1][SEKARANG][next1][next2]
-        drawCharCarousel(0, 26, CS_WIFI, csLen14, ci14);
+        drawCharCarousel(0, 26, cs14, csLen14, ci14);
 
         char posStr[30];
         snprintf(posStr, sizeof(posStr), "%d/%d", ci14+1, csLen14);
         ssd1306_draw_string_adafruit(0, 90, 47, posStr, WHITE, BLACK);
 
-        ssd1306_draw_string_adafruit(0, 0, 56, "OK=Tambah 2xOK=Selesai", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 0, 56, "OK=+  TahanOK=Connect", WHITE, BLACK);
         ssd1306_refresh(0, true);
     }
 
@@ -995,6 +1010,59 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 10, 18, wifiList[wifiKursor].ssid, WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 4, 34, "Salah password?", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 0, 54, "< Coba lagi", WHITE, BLACK);
+        ssd1306_refresh(0, true);
+    }
+
+    // ======================================================
+    // LAYAR 18: SAVED WIFI — daftar SSID yang password-nya tersimpan
+    // ======================================================
+    else if (appMode == 18) {
+        ssd1306_clear(0);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 1, "Saved WiFi", BLACK, WHITE);
+
+        int cnt = wifi_saved_count();
+        if (cnt == 0) {
+            ssd1306_draw_string_adafruit(0, 4, 22, "Belum ada wifi", WHITE, BLACK);
+            ssd1306_draw_string_adafruit(0, 4, 34, "yang tersimpan.", WHITE, BLACK);
+            ssd1306_draw_string_adafruit(0, 0, 54, "< Kembali", WHITE, BLACK);
+        } else {
+            for (int i = 0; i < 3; i++) {
+                int idx = savedWifiScroll + i;
+                if (idx >= cnt) break;
+                int y = 12 + i * 17;
+                bool sel = (idx == savedWifiKursor);
+                if (sel) ssd1306_fill_rectangle(0, 0, y-1, 128, 15, WHITE);
+                char baris[36];
+                snprintf(baris, sizeof(baris), "%.32s", wifi_saved_get_ssid(idx));
+                ssd1306_draw_string_adafruit(0, 2, y+1, baris,
+                    sel ? BLACK : WHITE, sel ? WHITE : BLACK);
+            }
+            ssd1306_draw_string_adafruit(0, 0, 56, "< Kembali OK Lihat", WHITE, BLACK);
+        }
+        ssd1306_refresh(0, true);
+    }
+
+    // ======================================================
+    // LAYAR 19: DETAIL SAVED WIFI — lihat password + hapus
+    // ======================================================
+    else if (appMode == 19) {
+        ssd1306_clear(0);
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 1, "Detail WiFi", BLACK, WHITE);
+
+        const char *ssidS = wifi_saved_get_ssid(savedWifiKursor);
+        const char *passS = wifi_saved_get_pass(savedWifiKursor);
+
+        ssd1306_draw_string_adafruit(0, 2, 14, "SSID:", WHITE, BLACK);
+        scrollTeks(ssidS, tmp, 20, true);
+        ssd1306_draw_string_adafruit(0, 2, 24, tmp, WHITE, BLACK);
+
+        ssd1306_draw_string_adafruit(0, 2, 36, "Password:", WHITE, BLACK);
+        scrollTeks(passS, tmp, 20, true);
+        ssd1306_draw_string_adafruit(0, 2, 46, tmp, WHITE, BLACK);
+
+        ssd1306_draw_string_adafruit(0, 0, 56, "<Kembali  OK=Hapus", WHITE, BLACK);
         ssd1306_refresh(0, true);
     }
 

@@ -49,43 +49,6 @@ jobs:
         run: |
           python3 -c "import os,pathlib; p=pathlib.Path(os.path.expanduser('~/esp-idf'))/'components/esp_gdbstub/src/gdbstub.c'; s=p.read_text(encoding='utf-8'); s=s.replace('#if (CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME || CONFIG_ESP_GDBSTUB_SUPPORT_TASKS)', '#if 1'); p.write_text(s, encoding='utf-8')"
 
-      - name: Ambil cert & buat header
-        run: |
-          mkdir -p main/include
-
-          # Ambil FULL chain (leaf + intermediate) pake -showcerts,
-          # bukan cuma leaf. Leaf doang gak bisa dipake ESP32 buat
-          # verify server (leaf bukan CA), makanya kemarin mbedtls
-          # error -0x2700 (X509_CERT_VERIFY_FAILED).
-          echo | openssl s_client -connect atlantich2h.com:443 -servername atlantich2h.com -showcerts 2>/dev/null \
-            | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' > chain.pem
-
-          # Ambil intermediate CA (WE1) langsung dari Google, ini yang
-          # nandatangan cert atlantich2h.com. Ini bagian PALING PENTING:
-          # tanpa ini, chain-nya putus dan verify tetep gagal walau kita
-          # udah showcerts.
-          curl -sL http://i.pki.goog/we1.crt -o we1.der
-          openssl x509 -inform DER -in we1.der -outform PEM > we1.pem
-
-          # Gabung: leaf (dari showcerts) + intermediate WE1.
-          # Kalau showcerts kebetulan udah include WE1 juga, gak masalah,
-          # dobel cert PEM tetep valid buat mbedtls.
-          cat chain.pem we1.pem > cert.pem
-
-          if [ ! -s cert.pem ]; then
-            echo "❌ Gagal ambil sertifikat, cert.pem kosong"
-            exit 1
-          fi
-
-          {
-            echo '#pragma once'
-            echo 'const char atlanticcert[] = '
-            sed 's/^/"/; s/$/\\n"/' cert.pem
-            echo ';'
-          } > main/include/server_cert.h
-
-          cat main/include/server_cert.h
-
       - name: Build Firmware
         run: |
           . ~/esp-idf/export.sh

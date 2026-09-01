@@ -124,7 +124,10 @@ if (appMode == 5) {
     // OK: tap = tambah karakter | tahan ≥450ms = SUBMIT & connect (gak nambah
     // karakter nyasar pas submit — ini yang bikin password ke-input salah)
     else if (appMode == 14) {
-        const int csWLen = CS_WIFI_LEN;   // Sekarang dari globals.h, sinkron sama display_system.c
+        // Sama persis kayak LAYAR 5: charset ganti-gantian ANGKA/HURUF
+        // tergantung `inputAngka`, bukan 1 charset gabungan tetap lagi.
+        const char *csW    = inputAngka ? CS_ANGKA : CS_HURUF;
+        const int   csWLen = inputAngka ? CS_ANGKA_LEN : CS_HURUF_LEN;
 
         static uint32_t tHold14   = 0;
         static bool     hold14    = false;
@@ -179,14 +182,15 @@ if (appMode == 5) {
             // Tap biasa → tambah 1 karakter ke password
             int l = strlen(wifiPassBuf);
             if (l < 63) {
-                wifiPassBuf[l]   = CS_WIFI[charIdx % csWLen];
+                wifiPassBuf[l]   = csW[charIdx % csWLen];
                 wifiPassBuf[l+1] = '\0';
                 charIdx = 0;
             }
         }
         oPrev14 = oDown;
 
-        // --- LEFT: 1x hapus char terakhir | 2x cepat = batal (balik ke list) ---
+        // --- LEFT: 1x hapus char terakhir (kosong = ganti mode ANGKA/HURUF,
+        // sama kayak LAYAR 5) | 2x cepat = batal (balik ke list) ---
         bool lPressed = lDown && !lPrev14;
         lPrev14 = lDown;
         if (lPressed && (now - lastOL14 >= 150)) {
@@ -199,7 +203,13 @@ if (appMode == 5) {
                 appMode = 13;
             } else {
                 int l = strlen(wifiPassBuf);
-                if (l > 0) wifiPassBuf[l-1] = '\0';
+                if (l > 0) {
+                    wifiPassBuf[l-1] = '\0';
+                    charIdx = 0;
+                } else {
+                    inputAngka = !inputAngka;
+                    charIdx    = 0;
+                }
             }
         }
         return;
@@ -273,9 +283,20 @@ if (appMode == 5) {
             }
         } else if (btn == BTN_OK && wifiTotal > 0) {
             if (wifiList[wifiKursor].has_pass) {
-                memset(wifiPassBuf, 0, sizeof(wifiPassBuf));
-                charIdx = 0;
-                appMode = 14;
+                char saved[64];
+                if (wifi_saved_lookup(wifiList[wifiKursor].ssid, saved, sizeof(saved))) {
+                    // Password buat SSID ini udah tersimpan — langsung
+                    // connect, gak perlu ngetik ulang tiap kali.
+                    strncpy(wifiPassBuf, saved, sizeof(wifiPassBuf) - 1);
+                    wifiPassBuf[sizeof(wifiPassBuf) - 1] = '\0';
+                    wifi_connect_selected();
+                    appMode = 15;
+                } else {
+                    memset(wifiPassBuf, 0, sizeof(wifiPassBuf));
+                    charIdx    = 0;
+                    inputAngka = true; // Reset ke mode ANGKA tiap mulai ngetik baru
+                    appMode    = 14;
+                }
             } else {
                 wifiPassBuf[0] = '\0';
                 wifi_connect_selected();
@@ -299,6 +320,42 @@ if (appMode == 5) {
             // Balik ke list, scan ulang
             wifi_scan_start();
             appMode = 13;
+        }
+        return;
+    }
+
+    // ---- SAVED WIFI LIST (mode 18) ----
+    // > geser | < kembali ke Settings | OK lihat detail (password + hapus)
+    if (appMode == 18) {
+        int cnt = wifi_saved_count();
+        if (btn == BTN_LEFT) {
+            if (savedWifiKursor > 0) {
+                savedWifiKursor--;
+                if (savedWifiKursor < savedWifiScroll) savedWifiScroll--;
+            } else {
+                appMode = 0; diSubMenu = true; katKursor = 3; subKursor = 4;
+            }
+        } else if (btn == BTN_RIGHT) {
+            if (savedWifiKursor < cnt - 1) {
+                savedWifiKursor++;
+                if (savedWifiKursor >= savedWifiScroll + 3) savedWifiScroll++;
+            }
+        } else if (btn == BTN_OK && cnt > 0) {
+            appMode = 19;
+        }
+        return;
+    }
+
+    // ---- SAVED WIFI DETAIL (mode 19) ----
+    // < kembali ke list | OK = hapus entry ini
+    if (appMode == 19) {
+        if (btn == BTN_LEFT) {
+            appMode = 18;
+        } else if (btn == BTN_OK) {
+            wifi_saved_delete(savedWifiKursor);
+            int cnt = wifi_saved_count();
+            if (savedWifiKursor >= cnt) savedWifiKursor = (cnt > 0) ? cnt - 1 : 0;
+            appMode = 18;
         }
         return;
     }
@@ -336,6 +393,7 @@ if (appMode == 5) {
                     else if (subKursor == 1) appMode = 7;
                     else if (subKursor == 2) appMode = 8;
                     else if (subKursor == 3) { wifi_scan_start(); appMode = 13; }
+                    else if (subKursor == 4) { savedWifiKursor = 0; savedWifiScroll = 0; appMode = 18; }
                 } else {
                     // Toko → ke daftar item
                     itemKursor = 0; itemScroll = 0;
