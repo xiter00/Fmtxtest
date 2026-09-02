@@ -51,44 +51,60 @@ jobs:
       - name: Ambil cert & buat header
         run: |
           mkdir -p main/include
+          OUT="main/include/server_cert.h"
 
-          # Ambil FULL chain (leaf + intermediate) pake -showcerts,
-          # bukan cuma leaf. Leaf doang gak bisa dipake ESP32 buat
-          # verify server (leaf bukan CA), makanya kemarin mbedtls
-          # error -0x2700 (X509_CERT_VERIFY_FAILED).
-          echo | openssl s_client -connect atlantich2h.com:443 -servername atlantich2h.com -showcerts 2>/dev/null \
-            | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' > chain.pem
+          # Daftar domain yang butuh cert: "domain:nama_variabel:url_root_ca"
+          # Root CA beda-beda tergantung siapa yang nerbitin cert-nya (cek
+          # dulu manual pake `openssl s_client -showcerts` terus liat siapa
+          # issuer paling atas, baru cari root-nya di situs resmi CA itu)
+          DOMAINS=(
+            "atlantich2h.com:atlanticcert:http://i.pki.goog/r4.crt"
+            "cek.topupgaming.com:topupgamingcert:https://letsencrypt.org/certs/isrgrootx1.pem"
+          )
 
-          # Ambil ROOT (GTS Root R4) langsung dari Google, BUKAN
-          # intermediate WE1. Alasannya: Google suka gonta-ganti
-          # intermediate mana yang nandatangan leaf (WE1/WE2/WR1/WR2/dst)
-          # tanpa pemberitahuan — kalau kita hardcode WE1 doang, chain bisa
-          # putus mendadak pas Google pindah ke intermediate lain, walau
-          # leaf-nya sendiri belum expired. Root R4 jadi jangkar trust buat
-          # SEMUA intermediate Google, dan umurnya puluhan tahun — jauh
-          # lebih awet daripada nge-pin satu intermediate spesifik.
-          curl -sL http://i.pki.goog/r4.crt -o r4.der
-          openssl x509 -inform DER -in r4.der -outform PEM > r4.pem
+          echo '#pragma once' > "$OUT"
+          echo '' >> "$OUT"
 
-          # Gabung: leaf+intermediate (dari showcerts, buat lengkapin
-          # rantai) + root R4 (jangkar trust). Dobel cert PEM (misal
-          # showcerts kebetulan udah bawa WE1 juga) tetep valid buat
-          # mbedtls.
-          cat chain.pem r4.pem > cert.pem
+          for entry in "${DOMAINS[@]}"; do
+            domain=$(echo "$entry" | cut -d: -f1)
+            varname=$(echo "$entry" | cut -d: -f2)
+            rooturl=$(echo "$entry" | cut -d: -f3-)
 
-          if [ ! -s cert.pem ]; then
-            echo "❌ Gagal ambil sertifikat, cert.pem kosong"
+            echo "=== Proses $domain -> $varname ==="
+
+            # Ambil leaf + intermediate langsung dari server
+            echo | openssl s_client -connect "$domain:443" -servername "$domain" -showcerts 2>/dev/null \
+              | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' > chain_tmp.pem
+
+            # Ambil root CA — bisa format DER (Google) atau PEM (Let's Encrypt),
+            # coba convert dari DER dulu, kalau gagal berarti udah PEM
+            curl -sL "$rooturl" -o root_tmp.der
+            openssl x509 -inform DER -in root_tmp.der -outform PEM > root_tmp.pem 2>/dev/null \
+              || cp root_tmp.der root_tmp.pem
+
+            cat chain_tmp.pem root_tmp.pem > cert_tmp.pem
+
+            if [ ! -s cert_tmp.pem ]; then
+              echo "❌ Gagal ambil sertifikat buat $domain"
+              exit 1
+            fi
+
+            {
+              echo "const char ${varname}[] ="
+              sed 's/^/"/; s/$/\\n"/' cert_tmp.pem
+              echo ';'
+              echo ''
+            } >> "$OUT"
+
+            rm -f chain_tmp.pem root_tmp.der root_tmp.pem cert_tmp.pem
+          done
+
+          if [ ! -s "$OUT" ]; then
+            echo "❌ server_cert.h kosong, gagal generate"
             exit 1
           fi
 
-          {
-            echo '#pragma once'
-            echo 'const char atlanticcert[] = '
-            sed 's/^/"/; s/$/\\n"/' cert.pem
-            echo ';'
-          } > main/include/server_cert.h
-
-          cat main/include/server_cert.h
+          cat "$OUT"
       - name: Build Firmware
         run: |
           . ~/esp-idf/export.sh

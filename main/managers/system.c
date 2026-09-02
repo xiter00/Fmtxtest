@@ -19,7 +19,7 @@
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "wifi_sys.h"
-#include "server_cert.h"   // atlanticcert[]
+#include "server_cert.h"   // atlanticcert[], topupgamingcert[]
 
 static const char *TAG = "system";
 static bool s_time_synced = false;
@@ -98,6 +98,78 @@ static esp_err_t _http_event_handler(esp_http_client_event_t *evt) {
 }
 
 // ============================================================
+// INTERNAL: Pilih cert_pem yang cocok berdasarkan domain di URL.
+//
+// Dicek SATU-SATU secara exact match (bukan 1 cert buat semua
+// domain kayak sebelumnya, dan bukan juga cek "mengandung" pakai
+// strstr) — soalnya server_cert.h sekarang nyimpen lebih dari 1
+// sertifikat, dan tiap sertifikat cuma valid buat domain
+// penerbitnya sendiri.
+// ============================================================
+typedef struct {
+    const char *domain;
+    const char *cert;
+} _CertEntry;
+
+// ============================================================
+// INTERNAL: Ambil hostname doang dari url, exclude scheme/path/port.
+// Contoh: "https://cek.topupgaming.com:8080/api/x" -> "cek.topupgaming.com"
+// Ditampung ke buffer yang disediakan caller (out), max out_len byte.
+// ============================================================
+static void _extract_host(const char *url, char *out, size_t out_len) {
+    out[0] = '\0';
+    if (!url || out_len == 0) return;
+
+    const char *p = strstr(url, "://");
+    p = p ? p + 3 : url;   // lewatin "https://" kalau ada
+
+    size_t i = 0;
+    while (p[i] != '\0' && p[i] != '/' && p[i] != ':' && p[i] != '?' && i < out_len - 1) {
+        out[i] = p[i];
+        i++;
+    }
+    out[i] = '\0';
+}
+
+// ============================================================
+// INTERNAL: Pilih cert_pem yang cocok berdasarkan domain di URL.
+//
+// Hostname di-extract dulu dari url, lalu dicek SATU-SATU ke tabel
+// _CERT_TABLE pakai exact match (strcmp), bukan "mengandung"
+// (strstr) — supaya "notatlantich2h.com" atau subdomain lain yang
+// kebetulan mirip gak ketuker ambil cert yang salah.
+//
+// Entry dicek berurutan dari atas: kalau entry ke-1 gak cocok,
+// lanjut cek entry ke-2, dst. Kalau sampai abis gak ada yang
+// cocok, return NULL.
+// ============================================================
+static const char *_pick_cert_for_url(const char *url) {
+    if (!url) return NULL;
+
+    static const _CertEntry _CERT_TABLE[] = {
+        { "atlantich2h.com",     atlanticcert    },
+        { "cek.topupgaming.com", topupgamingcert },
+    };
+    static const size_t _CERT_TABLE_LEN = sizeof(_CERT_TABLE) / sizeof(_CERT_TABLE[0]);
+
+    char host[128];
+    _extract_host(url, host, sizeof(host));
+
+    for (size_t i = 0; i < _CERT_TABLE_LEN; i++) {
+        if (strcmp(host, _CERT_TABLE[i].domain) == 0) {
+            ESP_LOGI(TAG, "[cert] host=%s cocok exact sama entry #%d (%s) -> pakai cert-nya",
+                     host, (int)i, _CERT_TABLE[i].domain);
+            return _CERT_TABLE[i].cert;
+        }
+        ESP_LOGI(TAG, "[cert] host=%s gak cocok entry #%d (%s), lanjut cek berikutnya",
+                 host, (int)i, _CERT_TABLE[i].domain);
+    }
+
+    ESP_LOGW(TAG, "[cert] host=%s gak cocok sertifikat manapun di tabel", host);
+    return NULL;
+}
+
+// ============================================================
 // INTERNAL: Core request function — semua fetch/post/dll lewat sini
 // ============================================================
 static HttpResp *_do_request(
@@ -168,19 +240,20 @@ static HttpResp *_do_request(
         .max = HTTP_MAX_BODY,
     };
 
+    // Cek satu-satu sertifikat mana yang cocok sama domain tujuan.
+    // Kalau gak ada yang cocok, cert_pem NULL aja.
+    const char *cert = _pick_cert_for_url(url);
+
     // Config HTTP client
     esp_http_client_config_t config = {
-    .url            = url,
-    .event_handler  = _http_event_handler,
-    .user_data      = &ctx,
-    .method         = method,
-    .timeout_ms     = HTTP_TIMEOUT_MS,
-    .buffer_size    = 512,
-    .buffer_size_tx = 512,
-    .cert_pem     = atlanticcert, // Percaya ke daftar CA resmi
-                                                 // (kayak browser), bukan 1
-                                                 // sertifikat spesifik yang
-                                                 // bisa expired/rotate
+        .url            = url,
+        .event_handler  = _http_event_handler,
+        .user_data      = &ctx,
+        .method         = method,
+        .timeout_ms     = HTTP_TIMEOUT_MS,
+        .buffer_size    = 512,
+        .buffer_size_tx = 512,
+        .cert_pem       = cert,   // NULL kalau gak ada yang cocok
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
