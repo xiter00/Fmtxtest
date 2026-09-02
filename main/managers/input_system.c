@@ -561,7 +561,7 @@ void handleStoreInput(int btn) {
                // Bangun "idGame|zoneID" atau "nomorHP"
             caraBayar = 0;
             appMode   = 9;
-            checkstatus = false
+            checkstatus = false;
         }
     }
 
