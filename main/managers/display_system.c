@@ -849,12 +849,12 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 2, 34, "UserID: ", WHITE, BLACK);
         scrollTeks(targetID, tmp, 13, true);
         ssd1306_draw_string_adafruit(0, 50, 34, tmp, WHITE, BLACK);
-        ssd1306_draw_string_adafruit(0, 2, 34, "Nick: ", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 2, 44, "Nick: ", WHITE, BLACK);
         if (ceknickgagal == false) {
         scrollTeks(nickname, tmp, 13, true);
-        ssd1306_draw_string_adafruit(0, 38, 34, tmp, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 38, 44, tmp, WHITE, BLACK);
         } else {
-        ssd1306_draw_string_adafruit(0, 38, 34, "Tidak Ditemukan", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 38, 44, "Tidak Ditemukan", WHITE, BLACK);
         }
         }
 
