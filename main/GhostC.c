@@ -47,6 +47,8 @@ bool      inputAngka  = true;   // Default: mode angka (0-9)
 bool itemtersedia = false;
 bool checkstatus = false;
 const char* apiKeyH2H = "n69ZrluCowPuGGnJ9nP8cQHlHAp21WHGKE1O66eHz3BVEUYbwPPmXgLevypIOLsNezoC3vsLo5IOCkKsPFKs5tUCA1t4TjYiiU3f";
+char nickname[64];
+bool ceknickgagal = false;
 
 // --- KEYBOARD CHARSETS (satu sumber buat input_system.c & display_system.c) ---
 const char CS_ANGKA[] = "0123456789";

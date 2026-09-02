@@ -228,8 +228,19 @@ static const StoreProduk itemGI[] = {
     {"60 Primogem",   "GI60",  14000}, {"300+30 Primo",  "GI300",  75000},
     {"980+110 Primo", "GI980", 210000}, {"1980+260 Primo","GI1980",420000},
 };
-static const int           totDiamond[] = {8, 6, 5, 4};
-static const StoreProduk  *tabDiamond[] = {itemML, itemFF, itemPUBG, itemGI};
+
+typedef struct {
+    const StoreProduk *item;
+    const char *sluggame;
+    int jumlah;
+} SubKategori;
+
+static const SubKategori tabDiamond[] = {
+    { itemML,  "mobile-legends", 8 },
+    { itemFF,  "free-fire",      6 },
+    { itemPUBG,"PUBG",           5 },
+    { itemGI,  "genshin",        4 },
+};
 
 static const StoreProduk itemTsel[] = {
     {"Pulsa 5rb","TSEL5",5000},  {"Pulsa 10rb","TSEL10",10000},
@@ -280,19 +291,22 @@ static const StoreProduk *tabMoney[] = {itemDANA, itemGoPay, itemOVO, itemSPay};
 // HELPER AKSES DATA
 // ==========================================================
 int storeGetTotal(int kat, int sub) {
-    if (kat == 0) return totDiamond[sub];
+    if (kat == 0) return tabDiamond[sub].jumlah;
     if (kat == 1) return totPulsa[sub];
     if (kat == 2) return totMoney[sub];
     return 0;
 }
 
 const StoreProduk *storeGetItem(int kat, int sub, int idx) {
-    if (kat == 0) return &tabDiamond[sub][idx];
+    if (kat == 0) return &tabDiamond[sub].item[idx];
     if (kat == 1) return &tabPulsa[sub][idx];
     if (kat == 2) return &tabMoney[sub][idx];
     return NULL;
 }
 
+const char *getGameSlug(int sub) {
+    return tabDiamond[sub].sluggame;
+}
 // ==========================================================
 // KONFIGURASI FIELD INPUT PER PRODUK
 //
@@ -427,23 +441,34 @@ void tampilkanMenuUtama() {
 // Makanya dipisah ke task sendiri: layar tetap jalan nampilin
 // "Checking Product...", task ini yang nunggu response di background.
 // ==========================================================
+typedef enum {
+    CEK_PRODUK,
+    CEK_NICKNAME
+} TipeCek;
+
 typedef struct {
+    TipeCek tipe;
     char kode[12];
+    char userid[20];
+    char zoneid[20];
+    char gameslug[20];
+    
 } CekProdukParam;
 
 static volatile bool s_cekProdukJalan = false;
-static const char *TAG_PRODUK = "cek_produk";
+static const char *TAG_PRODUK = "API";
 
 static void task_cek_produk(void *param) {
     CekProdukParam *cp = (CekProdukParam *)param;
-
-    char isibody[200];
-    snprintf(isibody, sizeof(isibody), "api_key=%s&type=prabayar&code=%s", apiKeyH2H, cp->kode);
+    char buff[200];
+    if (cp->tipe == CEK_PRODUK) {
+    
+    snprintf(buff, sizeof(buff), "api_key=%s&type=prabayar&code=%s", apiKeyH2H, cp->kode);
 
     HttpReq req = {
         .url = "https://atlantich2h.com/layanan/price_list",
         .method = SYS_POST,
-        .body = isibody,
+        .body = buff,
         .content_type = "application/x-www-form-urlencoded",
         
     };
@@ -470,7 +495,31 @@ tersedia = (status != NULL && strcmp(status, "available") == 0);
     itemtersedia     = tersedia;
     checkstatus      = true;
     s_cekProdukJalan = false;
+} else if (cp->tipe == CEK_NICKNAME) {
+snprintf(buff, sizeof(buff), "https://cek.topupgaming.com/api/game/%s?id=%s&zone=%s", cp->gameslug, cp->userid, cp->zoneid);
 
+    HttpResp *res = fetch(buff);
+
+    if (!res) {
+        ESP_LOGE(TAG_PRODUK, "GET NICKNAME GAGAL");
+    } else {
+      bool status = resp_bool(res, "status");
+       if (status == true) {
+cJSON *data = resp_obj(res, "data");
+const char *uname = obj_str(data, "username");
+if (uname) {
+    strncpy(nickname, uname, sizeof(nickname) - 1);  
+    nickname[sizeof(nickname) - 1] = '\0';
+}
+     } else {
+     ceknickgagal = true;
+     }   
+    }
+
+    if (res) fetch_free(res);
+    checkstatus      = true;
+    s_cekProdukJalan = false;
+}
     free(cp);
     vTaskDelete(NULL);
 }
@@ -583,8 +632,9 @@ void tampilkanStore() {
             // TETAP jalan normal sambil nunggu, gak ada blocking sama sekali.
             if (!s_cekProdukJalan) {
                 s_cekProdukJalan = true;
-                CekProdukParam *cp = malloc(sizeof(CekProdukParam));
+                CekProdukParam *cp = calloc(1, sizeof(CekProdukParam));
                 if (cp) {
+                    cp->tipe = CEK_PRODUK;
                     strncpy(cp->kode, p->kode, sizeof(cp->kode) - 1);
                     cp->kode[sizeof(cp->kode) - 1] = '\0';
                     xTaskCreate(task_cek_produk, "cek_produk", 4096, cp, 5, NULL);
@@ -732,7 +782,43 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
     // < kembali | OK lanjut ke aksi bayar
     // ======================================================
     else if (appMode == 6) {
-        const StoreProduk *p = storeGetItem(katKursor, subKursor, itemDipilih);
+    
+    const StoreProduk *p = storeGetItem(katKursor, subKursor, itemDipilih);
+
+    // Cek nickname cuma buat kategori Diamond (game)
+    if (katKursor == 0 && checkstatus == false) {
+        ssd1306_draw_string_adafruit(0, 16, 28, "Checking Nickname", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 12, 40, "Mohon tunggu...", WHITE, BLACK);
+
+        if (!s_cekProdukJalan) {
+            s_cekProdukJalan = true;
+            CekProdukParam *cp = calloc(1, sizeof(CekProdukParam));
+            if (cp) {
+                cp->tipe = CEK_NICKNAME;
+
+                strncpy(cp->userid, field[0].value, sizeof(cp->userid) - 1);
+                cp->userid[sizeof(cp->userid) - 1] = '\0';
+
+                // ZoneID cuma ada kalau totalField == 2 (F_ID_ZONE)
+                if (totalField == 2) {
+                    strncpy(cp->zoneid, field[1].value, sizeof(cp->zoneid) - 1);
+                    cp->zoneid[sizeof(cp->zoneid) - 1] = '\0';
+                }
+
+                strncpy(cp->gameslug, getGameSlug(subKursor), sizeof(cp->gameslug) - 1);
+                cp->gameslug[sizeof(cp->gameslug) - 1] = '\0';
+
+                xTaskCreate(task_cek_produk, "cek_nickname", 4096, cp, 5, NULL);
+            } else {
+                ceknickgagal     = true;
+                checkstatus      = true;
+                s_cekProdukJalan = false;
+            }
+        }
+        return;   // jangan gambar konten konfirmasi dulu selagi nunggu
+    }
+
+
 
         ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 28, 1, "KONFIRMASI", BLACK, WHITE);
@@ -749,6 +835,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 2, 24, buf, WHITE, BLACK);
 
         // Field values — scroll jika panjang
+        if (katKursor != 0) {
         for (int i = 0; i < totalField && i < 2; i++) {
             int yLine = 34 + (i * 10);
             snprintf(buf, sizeof(buf), "%s:", field[i].label);
@@ -756,6 +843,19 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
             ssd1306_draw_string_adafruit(0, 2, yLine, buf, WHITE, BLACK);
             scrollTeks(field[i].value, tmp, 13, true);
             ssd1306_draw_string_adafruit(0, 2+lw, yLine, tmp, WHITE, BLACK);
+        }
+        }else{
+
+        ssd1306_draw_string_adafruit(0, 2, 34, "UserID: ", WHITE, BLACK);
+        scrollTeks(targetID, tmp, 13, true);
+        ssd1306_draw_string_adafruit(0, 50, 34, tmp, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 2, 34, "Nick: ", WHITE, BLACK);
+        if (ceknickgagal == false) {
+        scrollTeks(nickname, tmp, 13, true);
+        ssd1306_draw_string_adafruit(0, 38, 34, tmp, WHITE, BLACK);
+        } else {
+        ssd1306_draw_string_adafruit(0, 38, 34, "Tidak Ditemukan", WHITE, BLACK);
+        }
         }
 
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);

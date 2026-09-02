@@ -484,7 +484,10 @@ void handleStoreInput(int btn) {
                 bool ok = true;
                 for (int f = 0; f < totalField; f++)
                     if (!strlen(field[f].value)) { ok=false; break; }
-                if (ok) appMode = 6;
+                if (ok) {
+                appMode = 6;
+                buildTargetID(); 
+                }
             }
         }
     }
@@ -553,10 +556,12 @@ void handleStoreInput(int btn) {
     else if (appMode == 6) {
         if (btn == BTN_LEFT) {
             appMode = 4;
+            checkstatus = false;
         } else if (btn == BTN_OK) {
-            buildTargetID();    // Bangun "idGame|zoneID" atau "nomorHP"
+               // Bangun "idGame|zoneID" atau "nomorHP"
             caraBayar = 0;
             appMode   = 9;
+            checkstatus = false
         }
     }
 
