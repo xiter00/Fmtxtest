@@ -84,7 +84,7 @@ extern bool itemtersedia;
 extern bool checkstatus;
 extern const char* apiKeyH2H;
 extern char nickname[64];
-extern bool checknickgagal;
+extern bool ceknickgagal;
 // ==========================================================
 // KEYBOARD CHARSETS — SATU SUMBER (dipakai input_system.c
 // buat logic DAN display_system.c buat gambar layar).

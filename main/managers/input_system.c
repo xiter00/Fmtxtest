@@ -557,11 +557,13 @@ void handleStoreInput(int btn) {
         if (btn == BTN_LEFT) {
             appMode = 4;
             checkstatus = false;
+            ceknickgagal = false;
         } else if (btn == BTN_OK) {
                // Bangun "idGame|zoneID" atau "nomorHP"
             caraBayar = 0;
             appMode   = 9;
             checkstatus = false;
+            ceknickgagal = false;
         }
     }
 
