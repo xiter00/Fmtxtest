@@ -786,9 +786,13 @@ void handleStoreInput(int btn) {
             appMode = 0; diSubMenu = false;
             katKursor = katIdx = 0;
             subKursor = 0; atasMenu = 0;
+            trxberhasil = false; checkstatus = false;
+            trxtimeout = false;
         }
         else if (btn == BTN_RIGHT) {
             appMode = 12;
+            trxberhasil = false; checkstatus = false;
+            trxtimeout = false;
         }
     }
 

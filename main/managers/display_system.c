@@ -15,6 +15,7 @@
 #include "system.h"
 #include "ota_sys.h"
 #include "pin_system.h"
+#include "esp_random.h"
 #define MAX_BINTANG 15
 
 // --- EXTERN ---
@@ -204,6 +205,33 @@ void scrollTeks(const char *src, char *out, int maxChar, bool aktif) {
 }
 
 
+
+// Charset siap pakai, tinggal pilih sesuai kebutuhan
+static const char RS_ALNUM[]  = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+static const char RS_DIGIT[]  = "0123456789";
+static const char RS_HEXLC[]  = "0123456789abcdef";
+
+// out     : buffer tujuan (harus udah dialokasi)
+// outSize : kapasitas buffer out (termasuk buat null terminator)
+// prefix  : opsional, boleh NULL/"" — ditaruh di depan (misal "TRX-")
+// charset : sumber karakter random (RS_ALNUM / RS_DIGIT / bikin sendiri)
+// len     : jumlah karakter random yang mau digenerate (di luar prefix)
+void randomStringGen(char *out, size_t outSize, const char *prefix,
+                      const char *charset, int len) {
+    size_t pLen = prefix ? strlen(prefix) : 0;
+    if (pLen >= outSize) { out[0] = '\0'; return; }
+    if (pLen) memcpy(out, prefix, pLen);
+
+    size_t csLen = strlen(charset);
+    size_t avail = outSize - pLen - 1;
+    if ((size_t)len > avail) len = (int)avail;
+
+    for (int i = 0; i < len; i++) {
+        uint32_t r = esp_random();          // TRNG hardware, tiap panggil beda
+        out[pLen + i] = charset[r % csLen];
+    }
+    out[pLen + len] = '\0';
+}
 
 // ==========================================================
 // DATA MENU
@@ -548,37 +576,102 @@ if (uname) {
     checkstatus      = true;
     s_cekProdukJalan = false;
 } else if (cp->tipe == SEND_ITEM) {
- snprintf(buff, sizeof(buff), "api_key=%s&code=%s&reff_id=TESTINGJUH12&target=%s", apiKeyH2H, cp->kode, targetID);
+    char reffId[32];
+    randomStringGen(reffId, sizeof(reffId), "TRX-", RS_ALNUM, 12);
+    
+    snprintf(buff, sizeof(buff), "api_key=%s&code=%s&reff_id=%s&target=%s", apiKeyH2H, cp->kode, reffId, targetID);
 
     HttpReq req = {
         .url = "https://atlantich2h.com/transaksi/create",
         .method = SYS_POST,
         .body = buff,
         .content_type = "application/x-www-form-urlencoded",
-        
     };
 
     HttpResp *res = http_request(&req);
     bool send = false;
+    
+    // ==========================================
+    // PERBAIKAN: Siapkan buffer untuk nyimpen ID
+    // ==========================================
+    char trx_id[64] = {0}; 
 
     if (!res) {
-        ESP_LOGE(TAG_PRODUK, "kode=%s: request gagal total (cek koneksi WiFi / server)", cp->kode);
+        ESP_LOGE(TAG_PRODUK, "kode=%s: request gagal total", cp->kode);
     } else {
-        
         ESP_LOGI(TAG_PRODUK, "kode=%s http_status=%d ok=%d body=%s",
                  cp->kode, res->status, res->ok, res->body ? res->body : "(kosong)");
-cJSON *data = resp_obj(res, "data");
-const char *status = obj_str(data, "status");
-send = (status != NULL && strcmp(status, "pending") == 0);
+        cJSON *data = resp_obj(res, "data");
+        const char *status = obj_str(data, "status");
+        const char *ida = obj_str(data, "id");
         
+        send = (status != NULL && (strcmp(status, "pending") == 0 || strcmp(status, "processing") == 0));
+        
+        // Simpan 'ida' ke 'trx_id' SEBELUM res di-free
+        if (send && ida != NULL) {
+            strncpy(trx_id, ida, sizeof(trx_id) - 1);
+        }
     }
 
-    if (res) fetch_free(res);
+    // Sekarang aman untuk menghapus res, karena ID sudah diselamatkan ke trx_id
+    if (res) fetch_free(res); 
 
-    trxberhasil     = send;
+    bool is_success = false;
+
+    if (send && strlen(trx_id) > 0) { // Pastikan trx_id tidak kosong
+        int max_retry = 12; // Timeout 60 detik
+
+        while (max_retry > 0) {
+            vTaskDelay(pdMS_TO_TICKS(5000));
+
+            // Gunakan trx_id, BUKAN ida
+            snprintf(buff, sizeof(buff), "api_key=%s&id=%s&type=prabayar", apiKeyH2H, trx_id);
+
+            HttpReq req_stat = {
+                .url = "https://atlantich2h.com/transaksi/status",
+                .method = SYS_POST,
+                .body = buff,
+                .content_type = "application/x-www-form-urlencoded",
+            };
+
+            HttpResp *res_stat = http_request(&req_stat);
+
+            if (res_stat) {
+                cJSON *data_stat = resp_obj(res_stat, "data");
+                const char *status_stat = obj_str(data_stat, "status");
+
+                if (status_stat != NULL) {
+                    ESP_LOGI(TAG_PRODUK, "Cek Status ID [%s] -> %s", trx_id, status_stat);
+                    
+                    if (strcmp(status_stat, "success") == 0) {
+                        is_success = true;
+                        fetch_free(res_stat);
+                        break; 
+                    } else if (strcmp(status_stat, "failed") == 0 || strcmp(status_stat, "error") == 0) {
+                        is_success = false;
+                        fetch_free(res_stat);
+                        break; 
+                    }
+                }
+                fetch_free(res_stat);
+            }
+            max_retry--;
+        }
+
+        if (max_retry == 0) {
+            ESP_LOGW(TAG_PRODUK, "Timeout! Status ID [%s] tidak berubah setelah 60 detik", trx_id);
+            // Anggap sukses sesuai kemauan lu (hati-hati dari sisi UI)
+            is_success = false;
+            trxtimeout = true;
+        }
+    }
+
+    trxberhasil      = is_success;
     checkstatus      = true;
     s_cekProdukJalan = false;
+
 }
+
     free(cp);
     vTaskDelete(NULL);
 }
@@ -1018,8 +1111,34 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         return;   // jangan gambar konten konfirmasi dulu selagi nunggu
     } 
         
-        if (trxberhasil == true) {
+        if (trxberhasil == true || trxtimeout == true) {
+        if (trxtimeout == true) {
         // Header
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
+        ssd1306_draw_string_adafruit(0, 14, 1, "TRX TIMEOUT!", BLACK, WHITE);
+
+        // Ikon centang 32x32 di pojok kiri-bawah area konten
+        oled_draw_bitmap(0,2,16,icon_centang_32,32,32,WHITE);
+        
+
+        // Panel kanan (x=35)
+        scrollTeks(p->nama, tmp, 13, true);
+        ssd1306_draw_string_adafruit(0, 37, 12, tmp, WHITE, BLACK);
+
+        char hBuf[14];
+        formatHarga(p->harga, hBuf, sizeof(hBuf));
+        snprintf(buf, sizeof(buf), "Rp %s", hBuf);
+        ssd1306_draw_string_adafruit(0, 37, 23, buf, WHITE, BLACK);
+
+        scrollTeks(targetID, tmp, 13, true);
+        ssd1306_draw_string_adafruit(0, 37, 34, tmp, WHITE, BLACK);
+
+        ssd1306_draw_string_adafruit(0, 37, 45, p->kode, WHITE, BLACK);
+
+        // Footer
+        ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
+        } else if (trxberhasil == true) {
         ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 14, 1, "TRX BERHASIL", BLACK, WHITE);
 
@@ -1044,6 +1163,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         // Footer
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
         ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
+        }
         } else {
         ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 22, 1, "TRX GAGAL", BLACK, WHITE);

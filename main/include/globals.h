@@ -92,6 +92,7 @@ extern const char* apiKeyH2H;
 extern char nickname[64];
 extern bool ceknickgagal;
 extern bool trxberhasil;
+extern bool trxtimeout;
 // -- PIN ENTRY (layar 30/31/32) --
 // pinBuf   : digit yang udah "dikonfirmasi" (ditekan OK), dipakai gantian
 //            buat entri PIN lama & PIN baru (mode 31 lalu 32) — dikosongin

@@ -52,6 +52,7 @@ bool trxberhasil = false;
 const char* apiKeyH2H = "n69ZrluCowPuGGnJ9nP8cQHlHAp21WHGKE1O66eHz3BVEUYbwPPmXgLevypIOLsNezoC3vsLo5IOCkKsPFKs5tUCA1t4TjYiiU3f";
 char nickname[64];
 bool ceknickgagal = false;
+bool trxtimeout = false;
 
 // -- PIN ENTRY (layar 30/31/32) --
 char pinBuf[PIN_LEN + 1] = {0};
