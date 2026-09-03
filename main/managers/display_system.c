@@ -463,9 +463,14 @@ void tampilkanMenuUtama() {
 // Makanya dipisah ke task sendiri: layar tetap jalan nampilin
 // "Checking Product...", task ini yang nunggu response di background.
 // ==========================================================
+static const char *TAG_PRODUK = "API";
+
+
+
 typedef enum {
     CEK_PRODUK,
-    CEK_NICKNAME
+    CEK_NICKNAME,
+    SEND_ITEM
 } TipeCek;
 
 typedef struct {
@@ -478,7 +483,7 @@ typedef struct {
 } CekProdukParam;
 
 static volatile bool s_cekProdukJalan = false;
-static const char *TAG_PRODUK = "API";
+
 
 static void task_cek_produk(void *param) {
     CekProdukParam *cp = (CekProdukParam *)param;
@@ -540,6 +545,37 @@ if (uname) {
     }
 
     if (res) fetch_free(res);
+    checkstatus      = true;
+    s_cekProdukJalan = false;
+} else if (cp->tipe == SEND_ITEM) {
+ snprintf(buff, sizeof(buff), "api_key=%s&code=%s&reff_id=TESTINGJUH12&target=%s", apiKeyH2H, cp->kode, targetID);
+
+    HttpReq req = {
+        .url = "https://atlantich2h.com/transaksi/create",
+        .method = SYS_POST,
+        .body = buff,
+        .content_type = "application/x-www-form-urlencoded",
+        
+    };
+
+    HttpResp *res = http_request(&req);
+    bool send = false;
+
+    if (!res) {
+        ESP_LOGE(TAG_PRODUK, "kode=%s: request gagal total (cek koneksi WiFi / server)", cp->kode);
+    } else {
+        
+        ESP_LOGI(TAG_PRODUK, "kode=%s http_status=%d ok=%d body=%s",
+                 cp->kode, res->status, res->ok, res->body ? res->body : "(kosong)");
+cJSON *data = resp_obj(res, "data");
+const char *status = obj_str(data, "status");
+send = (status != NULL && strcmp(status, "pending") == 0);
+        
+    }
+
+    if (res) fetch_free(res);
+
+    trxberhasil     = send;
     checkstatus      = true;
     s_cekProdukJalan = false;
 }
@@ -956,7 +992,33 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
     // ======================================================
     else if (appMode == 11) {
         const StoreProduk *p = storeGetItem(katKursor, subKursor, itemDipilih);
+        
 
+       if (checkstatus == false) {
+        ssd1306_draw_string_adafruit(0, 16, 28, "Mengirim Pesanan", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 12, 40, "Mohon tunggu...", WHITE, BLACK);
+        ssd1306_refresh(0, true);
+
+        if (!s_cekProdukJalan) {
+            s_cekProdukJalan = true;
+            CekProdukParam *cp = calloc(1, sizeof(CekProdukParam));
+            if (cp) {
+                cp->tipe = SEND_ITEM;
+
+                
+                strncpy(cp->kode, p->kode, sizeof(cp->kode) - 1);
+                    cp->kode[sizeof(cp->kode) - 1] = '\0';
+                xTaskCreate(task_cek_produk, "send_item", 8192, cp, 5, NULL);
+            } else {
+                trxberhasil     = false;
+                checkstatus      = true;
+                s_cekProdukJalan = false;
+            }
+        }
+        return;   // jangan gambar konten konfirmasi dulu selagi nunggu
+    } 
+        
+        if (trxberhasil == true) {
         // Header
         ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 14, 1, "TRX BERHASIL", BLACK, WHITE);
@@ -982,6 +1044,31 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         // Footer
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
         ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
+        } else {
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
+        ssd1306_draw_string_adafruit(0, 22, 1, "TRX GAGAL", BLACK, WHITE);
+
+        // Ikon silang 32x32 pojok kiri-bawah
+        oled_draw_bitmap(0,2,16,icon_silang_32,32,32,WHITE);
+        
+
+        // Panel kanan (x=35)
+        scrollTeks(p->nama, tmp, 13, true);
+        ssd1306_draw_string_adafruit(0,37, 12, tmp, WHITE, BLACK);
+
+        char hBuf[14];
+        formatHarga(p->harga, hBuf, sizeof(hBuf));
+        snprintf(buf, sizeof(buf), "Rp %s", hBuf);
+        ssd1306_draw_string_adafruit(0,37, 23, buf, WHITE, BLACK);
+
+        scrollTeks(targetID, tmp, 13, true);
+        ssd1306_draw_string_adafruit(0,37, 34, tmp, WHITE, BLACK);
+
+        ssd1306_draw_string_adafruit(0,37, 45, "Coba lagi!", WHITE, BLACK);
+
+        ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
+        }
     }
 
     // ======================================================
