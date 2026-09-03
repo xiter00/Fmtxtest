@@ -208,8 +208,6 @@ void scrollTeks(const char *src, char *out, int maxChar, bool aktif) {
 
 // Charset siap pakai, tinggal pilih sesuai kebutuhan
 static const char RS_ALNUM[]  = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-static const char RS_DIGIT[]  = "0123456789";
-static const char RS_HEXLC[]  = "0123456789abcdef";
 
 // out     : buffer tujuan (harus udah dialokasi)
 // outSize : kapasitas buffer out (termasuk buat null terminator)
