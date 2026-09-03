@@ -8,6 +8,7 @@
 #include "wifi_sys.h"
 #include "weblog_sys.h"
 #include "photo_data.h"
+#include "pin_system.h"
 
 extern void task_display(void *pvParameters);
 
@@ -51,6 +52,10 @@ const char* apiKeyH2H = "n69ZrluCowPuGGnJ9nP8cQHlHAp21WHGKE1O66eHz3BVEUYbwPPmXgL
 char nickname[64];
 bool ceknickgagal = false;
 
+// -- PIN ENTRY (layar 30/31/32) --
+char pinBuf[PIN_LEN + 1] = {0};
+int  pinPrev             = 0;
+
 // --- KEYBOARD CHARSETS (satu sumber buat input_system.c & display_system.c) ---
 const char CS_ANGKA[] = "0123456789";
 const char CS_HURUF[] = "abcdefghijklmnopqrstuvwxyz0123456789@._-ABCDEFGHIJKLMNOPQRSTUVWXYZ #";
@@ -73,5 +78,10 @@ void app_main(void) {
 
     ESP_LOGI("JirStore", "Booting...");
     wifi_init();
+
+    // NVS udah pasti siap begitu wifi_init() selesai (dia yang nginit
+    // NVS pertama kali) — aman buat pin_system baca/tulis PIN dari sini.
+    pin_system_init();
+
     xTaskCreate(task_display, "Display", 8192, NULL, 1, NULL);
 }

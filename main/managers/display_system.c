@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "system.h"
 #include "ota_sys.h"
+#include "pin_system.h"
 #define MAX_BINTANG 15
 
 // --- EXTERN ---
@@ -96,6 +97,7 @@ void task_display(void *pvParameters) {
             case 6: case 9: case 10: case 11: case 12:
             case 13: case 14: case 15: case 16: case 17:
             case 18: case 19:
+            case 30: case 31: case 32: case 35:
                 tampilkanStore(); break;
             case 7: renderAboutScreen();  break;
             case 8: renderRebootScreen(); break;
@@ -216,14 +218,14 @@ static const char *katHeader[] = {
 static const char *subGem[]   = {"Mobile Legends", "Free Fire", "PUBG Mobile", "Genshin Impact"};
 static const char *subPulsa[] = {"Telkomsel", "XL Axiata", "Indosat", "Tri"};
 static const char *subMoney[] = {"DANA", "GoPay", "OVO", "ShopeePay"};
-static const char *subSet[]   = {"Brightness", "About", "Reboot", "WiFi", "Saved WiFi", "Cek Update"};
+static const char *subSet[]   = {"Brightness", "About", "Reboot", "WiFi", "Saved WiFi", "Cek Update", "Edit PIN"};
 
-const int totalSubKat[] = {4, 4, 4, 6};  // Diakses dari input_system
+const int totalSubKat[] = {4, 4, 4, 7};  // Diakses dari input_system
 
 static const unsigned char *ikonGem[]   = {iconSmall_scan, iconSmall_wifi, iconSmall_sniff, iconSmall_spam};
 static const unsigned char *ikonPulsa[] = {iconSmall_apple, iconSmall_android, iconSmall_conn, iconSmall_scan};
 static const unsigned char *ikonMoney[] = {iconSmall_apple, iconSmall_android, iconSmall_conn, iconSmall_scan};
-static const unsigned char *ikonSet[]   = {iconSmall_bright, iconSmall_info, iconSmall_repeat, iconSmall_wifi, iconSmall_saved, iconSmall_repeat};
+static const unsigned char *ikonSet[]   = {iconSmall_bright, iconSmall_info, iconSmall_repeat, iconSmall_wifi, iconSmall_saved, iconSmall_repeat, iconSmall_scan};
 
 // ==========================================================
 // DATA PRODUK
@@ -522,6 +524,7 @@ snprintf(buff, sizeof(buff), "https://cek.topupgaming.com/api/game/%s?id=%s&zone
 
     if (!res) {
         ESP_LOGE(TAG_PRODUK, "GET NICKNAME GAGAL");
+        ceknickgagal = true;
     } else {
       bool status = resp_bool(res, "status");
        if (status == true) {
@@ -809,6 +812,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
     if (katKursor == 0 && checkstatus == false) {
         ssd1306_draw_string_adafruit(0, 16, 28, "Checking Nickname", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 12, 40, "Mohon tunggu...", WHITE, BLACK);
+        ssd1306_refresh(0, true);
 
         if (!s_cekProdukJalan) {
             s_cekProdukJalan = true;
@@ -836,7 +840,8 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
             }
         }
         return;   // jangan gambar konten konfirmasi dulu selagi nunggu
-    }
+    } 
+     
 
 
 
@@ -881,6 +886,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
         ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
         ssd1306_draw_string_adafruit(0, 104, 56, "[OK]",   BLACK, WHITE);
+        
     }
 
     // ======================================================
@@ -1009,6 +1015,75 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
 
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
         ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
+    }
+
+    // ======================================================
+    // LAYAR 30/31/32: INPUT PIN (transaksi / lama / baru)
+    // Layout SAMA kayak LAYAR 5 (input ID) / LAYAR 14 (password WiFi):
+    // buffer + kursor di atas, carousel angka di bawahnya — bedanya
+    // buffer di-mask jadi "*" (PIN gak boleh keliatan di layar), dan
+    // charset dikunci ANGKA doang (CS_ANGKA) karena PIN cuma digit.
+    // Kalau lockout aktif (5x salah), carousel diganti hitung mundur —
+    // sengaja, gak ngasih celah tebak2 selama nunggu.
+    // ======================================================
+    else if (appMode == 30 || appMode == 31 || appMode == 32) {
+        const char *judul =
+            (appMode == 30) ? "PIN TRANSAKSI" :
+            (appMode == 31) ? "MASUKKAN PIN LAMA" : "MASUKKAN PIN BARU";
+
+        int   len    = strlen(pinBuf);
+        bool  cekPin = (appMode == 30 || appMode == 31); // 32 gak ada lockout
+        uint32_t sisaMs = 0;
+        bool  locked = cekPin && pin_is_locked(&sisaMs);
+        int   ci     = pinPrev % CS_ANGKA_LEN;
+
+        // Header
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 1, (char *)judul, BLACK, WHITE);
+
+        // Buffer termask (bintang) + kursor underscore — persis pola
+        // disBuf di LAYAR 5, cuma isinya diganti '*' biar PIN gak bocor
+        char disBuf[PIN_LEN + 2] = {0};
+        for (int i = 0; i < len; i++) disBuf[i] = '*';
+        if (len < PIN_LEN) disBuf[len] = '_';
+        ssd1306_draw_string_adafruit(0, 2, 12, disBuf, WHITE, BLACK);
+        ssd1306_draw_hline(0, 0, 21, 128, WHITE);
+
+        if (locked) {
+            snprintf(buf, sizeof(buf), "Coba lagi %lus", (unsigned long)((sisaMs / 1000) + 1));
+            ssd1306_draw_string_adafruit(0, 4, 30, "Terlalu banyak salah", WHITE, BLACK);
+            ssd1306_draw_string_adafruit(0, 30, 42, buf, WHITE, BLACK);
+        } else {
+            // Carousel angka — sama persis kayak LAYAR 5/14
+            drawCharCarousel(0, 26, CS_ANGKA, CS_ANGKA_LEN, ci);
+
+            if (cekPin) {
+                snprintf(buf, sizeof(buf), "Sisa: %dx", pin_attempts_left());
+                ssd1306_draw_string_adafruit(0, 4, 47, buf, WHITE, BLACK);
+            } else {
+                snprintf(buf, sizeof(buf), "%d/%d", ci + 1, CS_ANGKA_LEN);
+                ssd1306_draw_string_adafruit(0, 90, 47, buf, WHITE, BLACK);
+            }
+        }
+
+        ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
+        const char *lbl = (len > 0) ? "< HAPUS" : "< BATAL";
+        ssd1306_draw_string_adafruit(0, 2, 56, (char *)lbl, BLACK, WHITE);
+        if (!locked) ssd1306_draw_string_adafruit(0, 78, 56, "OK isi/tahan", BLACK, WHITE);
+    }
+
+    // ======================================================
+    // LAYAR 35: PIN BERHASIL DIUBAH (konfirmasi)
+    // ======================================================
+    else if (appMode == 35) {
+        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
+        ssd1306_draw_string_adafruit(0, 14, 1, "PIN DIUBAH", BLACK, WHITE);
+
+        oled_draw_bitmap(0, 48, 14, icon_centang_32, 32, 32, WHITE);
+        ssd1306_draw_string_adafruit(0, 10, 48, "PIN baru tersimpan", WHITE, BLACK);
+
+        ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "< KEMBALI", BLACK, WHITE);
     }
 
     

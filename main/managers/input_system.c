@@ -8,6 +8,7 @@
 #include "globals.h"
 #include "wifi_sys.h"
 #include "ota_sys.h"
+#include "pin_system.h"
 
 // --- Extern dari display_system.c ---
 extern int storeGetTotal(int kat, int sub);
@@ -41,6 +42,47 @@ void buildTargetID() {
                  field[0].value, field[1].value);
     } else {
         snprintf(targetID, sizeof(targetID), "%s", field[0].value);
+    }
+}
+
+// ==========================================================
+// SELESAI INPUT PIN — dipanggil begitu buffer PIN_LEN digit
+// penuh, ATAU pas user TAHAN OK buat "selesai" lebih awal.
+// Beda perlakuan tergantung appMode PIN yang lagi aktif:
+//  30 = PIN transaksi (TF/BAYAR)   -> verifikasi, sukses ke layar 11
+//  31 = PIN lama (Edit PIN)        -> verifikasi, sukses ke layar 32
+//  32 = PIN baru (Edit PIN)        -> gak ada verifikasi, langsung simpan
+// ==========================================================
+static void pinHandleSelesai(void) {
+    if (appMode == 32) {
+        // PIN baru: gak dicek benar/salah, siapapun isinya langsung disimpan.
+        // Kalau kepencet SELESAI sebelum genap PIN_LEN digit, jangan simpan
+        // dulu — user masih ngetik.
+        if (strlen(pinBuf) != PIN_LEN) return;
+        pin_change(pinBuf);
+        memset(pinBuf, 0, sizeof(pinBuf));
+        pinPrev = 0;
+        appMode = 35;
+        return;
+    }
+
+    // appMode 30 / 31: perlu digit lengkap biar bisa dicocokkan sama PIN
+    // yang tersimpan (pin_verify udah nolak sendiri kalau lockout aktif).
+    if (strlen(pinBuf) != PIN_LEN) return;
+
+    bool ok = pin_verify(pinBuf);
+    memset(pinBuf, 0, sizeof(pinBuf));
+    pinPrev = 0;
+
+    if (!ok) return; // Salah / lagi lockout -> tetap di layar yang sama
+
+    if (appMode == 30) {
+        // PIN transaksi benar -> eksekusi TF/BAYAR
+        // TODO: panggil API H2H di sini. Hasil API -> appMode 11 (berhasil)
+        // atau 12 (gagal). Untuk placeholder, langsung ke TRX Berhasil:
+        appMode = 11;
+    } else if (appMode == 31) {
+        appMode = 32; // PIN lama benar -> lanjut input PIN baru
     }
 }
 
@@ -216,6 +258,105 @@ if (appMode == 5) {
         return;
     }
 
+    // ---- LAYAR 30/31/32: INPUT PIN — sama persis mekanismenya kayak
+    // LAYAR 14 (password WiFi) / LAYAR 5 (input ID), cuma charset-nya
+    // dikunci ANGKA (CS_ANGKA) doang karena PIN emang cuma angka.
+    // > tahan = auto-repeat geser angka makin cepat
+    // OK tap  = tambah 1 digit ke pinBuf
+    // OK tahan (>=450ms) = SELESAI: coba verifikasi/simpan sekarang juga
+    //           (kalau belum genap PIN_LEN digit, gak ngapa2in — nunggu
+    //           digit lengkap dulu, lihat pinHandleSelesai())
+    // < (ada isi) = hapus 1 digit terakhir
+    // < (kosong)  = BATAL, keluar dari layar PIN
+    // Auto-submit juga tetap jalan begitu digit ke-PIN_LEN masuk lewat tap.
+    else if (appMode == 30 || appMode == 31 || appMode == 32) {
+        static uint32_t tHoldP  = 0;
+        static bool     holdP   = false;
+        static uint32_t tRepP   = 0;
+        static uint32_t lastOLP = 0;
+        static bool     oPrevP  = false;
+        static bool     lPrevP  = false;
+        static uint32_t tOKDownP = 0;
+        static bool     okLongP  = false;
+
+        bool locked = pin_is_locked(NULL) && appMode != 32; // 32 (PIN baru) gak kena lockout
+
+        bool rDown = (gpio_get_level(PIN_RIGHT) == 0);
+        bool lDown = (gpio_get_level(PIN_LEFT)  == 0);
+        bool oDown = (gpio_get_level(PIN_OK)    == 0);
+
+        if (rDown) {
+            // --- Auto-repeat RIGHT, sama kayak LAYAR 5/14 ---
+            if (!locked) {
+                if (!holdP) {
+                    if (now - lastPress < 120) return;
+                    holdP = true; tHoldP = now; tRepP = now;
+                    lastPress = now;
+                    pinPrev = (pinPrev + 1) % CS_ANGKA_LEN;
+                } else {
+                    uint32_t d  = now - tHoldP;
+                    uint32_t iv = (d > 900) ? 25 : (d > 500) ? 50 : (d > 300) ? 90 : 0;
+                    if (iv > 0 && now - tRepP >= iv) {
+                        tRepP = now;
+                        pinPrev = (pinPrev + 1) % CS_ANGKA_LEN;
+                    }
+                }
+            }
+            return;
+        } else {
+            holdP = false;
+        }
+
+        // --- OK: TAP = tambah digit | TAHAN (>=450ms) = SELESAI ---
+        // (diabaikan total selagi lockout — gak boleh coba masukin apa2)
+        if (oDown) {
+            if (!oPrevP) {
+                tOKDownP = now;
+                okLongP  = false;
+            } else if (!locked && !okLongP && (now - tOKDownP >= OK_LONG_MS)) {
+                okLongP   = true;
+                lastPress = now;
+                pinHandleSelesai();
+            }
+        } else if (oPrevP && !okLongP && !locked) {
+            // Tap biasa -> tambah 1 digit
+            int l = strlen(pinBuf);
+            if (l < PIN_LEN) {
+                pinBuf[l]   = CS_ANGKA[pinPrev % CS_ANGKA_LEN];
+                pinBuf[l+1] = '\0';
+                pinPrev = 0;
+                l++;
+            }
+            if (l == PIN_LEN) pinHandleSelesai(); // Auto-submit pas genap
+        }
+        oPrevP = oDown;
+
+        // --- LEFT: hapus 1 digit terakhir | kosong = BATAL ---
+        // (LEFT tetap boleh dipencet walau lockout — biar user tetap bisa
+        // keluar/batal dari layar PIN sambil nunggu, cuma gak bisa nginput.)
+        bool lPressed = lDown && !lPrevP;
+        lPrevP = lDown;
+        if (lPressed && (now - lastOLP >= 150)) {
+            lastOLP = now;
+            int l = strlen(pinBuf);
+            if (l > 0) {
+                pinBuf[l-1] = '\0';
+                pinPrev = 0;
+            } else {
+                // Buffer kosong -> batal, balik ke layar sebelumnya
+                memset(pinBuf, 0, sizeof(pinBuf));
+                pinPrev = 0;
+                if (appMode == 30) {
+                    appMode = 9;  // Batal PIN transaksi -> balik pilih pembayaran
+                } else {
+                    // 31 (verifikasi PIN lama) atau 32 (isi PIN baru) -> Settings
+                    appMode = 0; diSubMenu = true; katKursor = 3; subKursor = 6;
+                }
+            }
+        }
+        return;
+    }
+
     // ---- CONNECTING (mode 15) — auto-transition, HARUS dicek tiap loop ----
     // Jangan taruh di bawah "if (btn == BTN_NONE) return;" karena kalau user
     // gak pencet tombol pas nunggu konek, status connected/failed gak pernah
@@ -252,8 +393,9 @@ if (appMode == 5) {
     if (btn == BTN_NONE) return;
     lastPress = now;
 
-    // Delegasi ke store handler (layar 2-6 dan 9-12)
-    if ((appMode >= 2 && appMode <= 6) || (appMode >= 9 && appMode <= 12)) {
+    // Delegasi ke store handler (layar 2-6, 9-12, dan konfirmasi PIN 35)
+    if ((appMode >= 2 && appMode <= 6) || (appMode >= 9 && appMode <= 12) ||
+        appMode == 35) {
         handleStoreInput(btn); return;
     }
 
@@ -431,6 +573,12 @@ if (appMode == 5) {
                     else if (subKursor == 3) { wifi_scan_start(); appMode = 13; }
                     else if (subKursor == 4) { savedWifiKursor = 0; savedWifiScroll = 0; appMode = 18; }
                     else if (subKursor == 5) { ota_check_start(); appMode = 20; }
+                    else if (subKursor == 6) {
+                        // Edit PIN — wajib masukin PIN LAMA dulu buat verifikasi
+                        memset(pinBuf, 0, sizeof(pinBuf));
+                        pinPrev = 0;
+                        appMode = 31;
+                    }
                 } else {
                     // Toko → ke daftar item
                     itemKursor = 0; itemScroll = 0;
@@ -509,7 +657,7 @@ void handleStoreInput(int btn) {
         if (btn == BTN_RIGHT) {
             fieldKursor = (fieldKursor + 1) % totRow;
         } else if (btn == BTN_LEFT) {
-            appMode = 3;
+            appMode = 2;
         } else if (btn == BTN_OK) {
             if (fieldKursor < totalField) {
                 // Edit field → ke input karakter
@@ -615,12 +763,13 @@ void handleStoreInput(int btn) {
             appMode = 6;
         } else if (btn == BTN_OK) {
             if (caraBayar == 1) {
-                appMode = 10; // Tampilkan QRIS
+                appMode = 10; // QRIS -> tampilkan langsung, gak perlu PIN
             } else {
-                // BAYAR → TODO: panggil API H2H di sini
-                // Hasil API → appMode 11 (berhasil) atau 12 (gagal)
-                // Untuk placeholder, langsung ke TRX Berhasil:
-                appMode = 11;
+                // TF/BAYAR -> wajib PIN dulu, eksekusi sebenarnya baru
+                // jalan setelah PIN benar (lihat appMode 30 di handleJoystick)
+                memset(pinBuf, 0, sizeof(pinBuf));
+                pinPrev = 0;
+                appMode = 30;
             }
         }
     }
@@ -656,6 +805,16 @@ void handleStoreInput(int btn) {
         }
         else if (btn == BTN_RIGHT) {
             appMode = 11;
+        }
+    }
+
+    // --------------------------------------------------
+    // LAYAR 35: PIN BERHASIL DIUBAH (konfirmasi)
+    // < / OK -> balik ke Settings
+    // --------------------------------------------------
+    else if (appMode == 35) {
+        if (btn == BTN_LEFT || btn == BTN_OK) {
+            appMode = 0; diSubMenu = true; katKursor = 3; subKursor = 6;
         }
     }
 }

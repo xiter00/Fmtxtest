@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "driver/gpio.h"
+#include "pin_system.h"
 
 // --- PIN TOMBOL ---
 #define PIN_LEFT  5
@@ -31,6 +32,11 @@
 // 10 = Layar QRIS
 // 11 = TRX Berhasil
 // 12 = TRX Gagal
+// 30 = Input PIN Transaksi (sebelum eksekusi TF/BAYAR dari layar 9 —
+//      QRIS TIDAK butuh PIN, langsung ke layar 10)
+// 31 = Input PIN Lama (Settings > Edit PIN, verifikasi dulu)
+// 32 = Input PIN Baru (Settings > Edit PIN, setelah PIN lama benar)
+// 35 = PIN Berhasil Diubah (konfirmasi)
 // ==========================================================
 
 // --- STRUCT PRODUK ---
@@ -85,6 +91,15 @@ extern bool checkstatus;
 extern const char* apiKeyH2H;
 extern char nickname[64];
 extern bool ceknickgagal;
+
+// -- PIN ENTRY (layar 30/31/32) --
+// pinBuf   : digit yang udah "dikonfirmasi" (ditekan OK), dipakai gantian
+//            buat entri PIN lama & PIN baru (mode 31 lalu 32) — dikosongin
+//            tiap pindah antar layar PIN biar gak nyampur.
+// pinPrev  : angka 0-9 yang lagi digeser (belum ditekan OK), sebelum
+//            ditambahin ke pinBuf.
+extern char pinBuf[PIN_LEN + 1];
+extern int  pinPrev;
 // ==========================================================
 // KEYBOARD CHARSETS — SATU SUMBER (dipakai input_system.c
 // buat logic DAN display_system.c buat gambar layar).
