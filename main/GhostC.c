@@ -48,6 +48,7 @@ bool      inputAngka  = true;   // Default: mode angka (0-9)
 // -- SYSTEM API --
 bool itemtersedia = false;
 bool checkstatus = false;
+bool trxberhasil = false;
 const char* apiKeyH2H = "n69ZrluCowPuGGnJ9nP8cQHlHAp21WHGKE1O66eHz3BVEUYbwPPmXgLevypIOLsNezoC3vsLo5IOCkKsPFKs5tUCA1t4TjYiiU3f";
 char nickname[64];
 bool ceknickgagal = false;
