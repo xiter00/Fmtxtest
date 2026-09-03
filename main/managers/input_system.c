@@ -7,6 +7,7 @@
 #include "driver/gpio.h"
 #include "globals.h"
 #include "wifi_sys.h"
+#include "ota_sys.h"
 
 // --- Extern dari display_system.c ---
 extern int storeGetTotal(int kat, int sub);
@@ -225,6 +226,22 @@ if (appMode == 5) {
         return;
     }
 
+    // ---- OTA: CEK VERSI (mode 20) — auto-transition, sama kayak mode 15 ----
+    if (appMode == 20) {
+        if      (otaState == OTA_ST_NO_UPDATE)        appMode = 21;
+        else if (otaState == OTA_ST_UPDATE_AVAILABLE)  appMode = 22;
+        else if (otaState == OTA_ST_CHECK_FAILED)      appMode = 25;
+        return;
+    }
+
+    // ---- OTA: DOWNLOADING (mode 23) — auto-transition ke sukses/gagal ----
+    // Sukses bakal reboot sendiri dari task-nya, tapi tetep dicek di sini
+    // buat jaga-jaga / nampilin state gagal.
+    if (appMode == 23) {
+        if (otaState == OTA_ST_FAILED) appMode = 25;
+        return;
+    }
+
     // ---- Debounce normal untuk semua mode lain ----
     if (now - lastPress < 250) return;
 
@@ -262,6 +279,25 @@ if (appMode == 5) {
     if (appMode == 8) {
         if      (btn == BTN_LEFT) { appMode=0; diSubMenu=true; katKursor=3; subKursor=2; }
         else if (btn == BTN_OK)   { esp_restart(); }
+        return;
+    }
+
+    // ---- OTA: TIDAK ADA UPDATE (layar 21) — tombol kiri doang buat balik ----
+    if (appMode == 21) {
+        if (btn == BTN_LEFT) { appMode=0; diSubMenu=true; katKursor=3; subKursor=5; }
+        return;
+    }
+
+    // ---- OTA: ADA UPDATE (layar 22) — < batal | OK mulai update ----
+    if (appMode == 22) {
+        if      (btn == BTN_LEFT) { appMode=0; diSubMenu=true; katKursor=3; subKursor=5; }
+        else if (btn == BTN_OK)   { ota_update_start(); appMode=23; }
+        return;
+    }
+
+    // ---- OTA: GAGAL (layar 25) — tombol kiri doang buat balik ----
+    if (appMode == 25) {
+        if (btn == BTN_LEFT) { appMode=0; diSubMenu=true; katKursor=3; subKursor=5; }
         return;
     }
 
@@ -394,6 +430,7 @@ if (appMode == 5) {
                     else if (subKursor == 2) appMode = 8;
                     else if (subKursor == 3) { wifi_scan_start(); appMode = 13; }
                     else if (subKursor == 4) { savedWifiKursor = 0; savedWifiScroll = 0; appMode = 18; }
+                    else if (subKursor == 5) { ota_check_start(); appMode = 20; }
                 } else {
                     // Toko → ke daftar item
                     itemKursor = 0; itemScroll = 0;

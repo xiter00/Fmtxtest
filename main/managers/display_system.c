@@ -13,6 +13,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "system.h"
+#include "ota_sys.h"
 #define MAX_BINTANG 15
 
 // --- EXTERN ---
@@ -30,6 +31,12 @@ void tampilkanStore(void);
 void tampilkanBrightness(void);
 void renderAboutScreen(void);
 void renderRebootScreen(void);
+void renderOtaChecking(void);
+void renderOtaNoUpdate(void);
+void renderOtaAvailable(void);
+void renderOtaDownloading(void);
+void renderOtaSuccess(void);
+void renderOtaFailed(void);
 
 bool introDone = false;
 
@@ -52,6 +59,13 @@ void init_joystick() {
 // appMode 7  → about
 // appMode 8  → reboot
 // appMode 13-17 → WiFi (list/password/connecting/sukses/gagal)
+// appMode 18-19 → Saved WiFi (list/detail)
+// appMode 20 → OTA: checking version
+// appMode 21 → OTA: no update
+// appMode 22 → OTA: update available (konfirmasi)
+// appMode 23 → OTA: downloading/flashing
+// appMode 24 → OTA: success
+// appMode 25 → OTA: failed
 // ==========================================================
 void task_display(void *pvParameters) {
     init_joystick();
@@ -85,6 +99,12 @@ void task_display(void *pvParameters) {
                 tampilkanStore(); break;
             case 7: renderAboutScreen();  break;
             case 8: renderRebootScreen(); break;
+            case 20: renderOtaChecking();    break;
+            case 21: renderOtaNoUpdate();    break;
+            case 22: renderOtaAvailable();   break;
+            case 23: renderOtaDownloading(); break;
+            case 24: renderOtaSuccess();     break;
+            case 25: renderOtaFailed();      break;
             default: break;
         }
         vTaskDelay(pdMS_TO_TICKS(33));
@@ -196,14 +216,14 @@ static const char *katHeader[] = {
 static const char *subGem[]   = {"Mobile Legends", "Free Fire", "PUBG Mobile", "Genshin Impact"};
 static const char *subPulsa[] = {"Telkomsel", "XL Axiata", "Indosat", "Tri"};
 static const char *subMoney[] = {"DANA", "GoPay", "OVO", "ShopeePay"};
-static const char *subSet[]   = {"Brightness", "About", "Reboot", "WiFi", "Saved WiFi"};
+static const char *subSet[]   = {"Brightness", "About", "Reboot", "WiFi", "Saved WiFi", "Cek Update"};
 
-const int totalSubKat[] = {4, 4, 4, 5};  // Diakses dari input_system
+const int totalSubKat[] = {4, 4, 4, 6};  // Diakses dari input_system
 
 static const unsigned char *ikonGem[]   = {iconSmall_scan, iconSmall_wifi, iconSmall_sniff, iconSmall_spam};
 static const unsigned char *ikonPulsa[] = {iconSmall_apple, iconSmall_android, iconSmall_conn, iconSmall_scan};
 static const unsigned char *ikonMoney[] = {iconSmall_apple, iconSmall_android, iconSmall_conn, iconSmall_scan};
-static const unsigned char *ikonSet[]   = {iconSmall_bright, iconSmall_info, iconSmall_repeat, iconSmall_wifi};
+static const unsigned char *ikonSet[]   = {iconSmall_bright, iconSmall_info, iconSmall_repeat, iconSmall_wifi, iconSmall_saved, iconSmall_repeat};
 
 // ==========================================================
 // DATA PRODUK
@@ -637,7 +657,7 @@ void tampilkanStore() {
                     cp->tipe = CEK_PRODUK;
                     strncpy(cp->kode, p->kode, sizeof(cp->kode) - 1);
                     cp->kode[sizeof(cp->kode) - 1] = '\0';
-                    xTaskCreate(task_cek_produk, "cek_produk", 4096, cp, 5, NULL);
+                    xTaskCreate(task_cek_produk, "cek_produk", 8192, cp, 5, NULL);
                 } else {
                     // Malloc gagal (harusnya jarang) — anggap gak tersedia
                     itemtersedia    = false;
@@ -808,7 +828,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
                 strncpy(cp->gameslug, getGameSlug(subKursor), sizeof(cp->gameslug) - 1);
                 cp->gameslug[sizeof(cp->gameslug) - 1] = '\0';
 
-                xTaskCreate(task_cek_produk, "cek_nickname", 4096, cp, 5, NULL);
+                xTaskCreate(task_cek_produk, "cek_nickname", 8192, cp, 5, NULL);
             } else {
                 ceknickgagal     = true;
                 checkstatus      = true;
@@ -1219,5 +1239,74 @@ void renderRebootScreen() {
     ssd1306_draw_string_adafruit(0, 20, 20, "Reboot sekarang?", WHITE, BLACK);
     ssd1306_draw_string_adafruit(0, 2, 56, "< NO",  WHITE, BLACK);
     ssd1306_draw_string_adafruit(0, 104, 56, "[OK]",  WHITE, BLACK);
+    ssd1306_refresh(0, true);
+}
+
+// ==========================================================
+// CEK UPDATE (OTA) — layar 20-25
+// ==========================================================
+void renderOtaChecking() {
+    ssd1306_clear(0);
+    ssd1306_draw_rectangle(0, 5, 5, 118, 54, WHITE);
+    ssd1306_draw_string_adafruit(0, 14, 22, "Cek update...", WHITE, BLACK);
+    ssd1306_draw_string_adafruit(0, 10, 34, "Mohon tunggu", WHITE, BLACK);
+    ssd1306_refresh(0, true);
+}
+
+void renderOtaNoUpdate() {
+    ssd1306_clear(0);
+    ssd1306_draw_rectangle(0, 5, 5, 118, 54, WHITE);
+    ssd1306_draw_string_adafruit(0, 8, 18, "Sudah versi", WHITE, BLACK);
+    ssd1306_draw_string_adafruit(0, 8, 28, "terbaru.", WHITE, BLACK);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "Ver: %s", ota_get_current_version());
+    ssd1306_draw_string_adafruit(0, 8, 40, buf, WHITE, BLACK);
+    ssd1306_draw_string_adafruit(0, 2, 56, "< OK", WHITE, BLACK);
+    ssd1306_refresh(0, true);
+}
+
+void renderOtaAvailable() {
+    ssd1306_clear(0);
+    ssd1306_draw_rectangle(0, 5, 5, 118, 54, WHITE);
+    ssd1306_draw_string_adafruit(0, 8, 15, "Update tersedia!", WHITE, BLACK);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "Now : %s", ota_get_current_version());
+    ssd1306_draw_string_adafruit(0, 8, 27, buf, WHITE, BLACK);
+    snprintf(buf, sizeof(buf), "Baru: %s", otaServerVersion);
+    ssd1306_draw_string_adafruit(0, 8, 37, buf, WHITE, BLACK);
+    ssd1306_draw_string_adafruit(0, 2, 56, "< NO",  WHITE, BLACK);
+    ssd1306_draw_string_adafruit(0, 104, 56, "[OK]",  WHITE, BLACK);
+    ssd1306_refresh(0, true);
+}
+
+void renderOtaDownloading() {
+    ssd1306_clear(0);
+    ssd1306_draw_rectangle(0, 5, 5, 118, 54, WHITE);
+    ssd1306_draw_string_adafruit(0, 10, 18, "Mengupdate...", WHITE, BLACK);
+    int p = otaProgress;
+    if (p < 0) p = 0;
+    if (p > 100) p = 100;
+    drawLoadingBar(14, 32, 100, 10, p);
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d%%", p);
+    ssd1306_draw_string_adafruit(0, 54, 46, buf, WHITE, BLACK);
+    ssd1306_refresh(0, true);
+}
+
+void renderOtaSuccess() {
+    ssd1306_clear(0);
+    ssd1306_draw_rectangle(0, 5, 5, 118, 54, WHITE);
+    ssd1306_draw_string_adafruit(0, 16, 22, "Berhasil!", WHITE, BLACK);
+    ssd1306_draw_string_adafruit(0, 8, 34, "Reboot...", WHITE, BLACK);
+    ssd1306_refresh(0, true);
+}
+
+void renderOtaFailed() {
+    ssd1306_clear(0);
+    ssd1306_draw_rectangle(0, 5, 5, 118, 54, WHITE);
+    ssd1306_draw_string_adafruit(0, 12, 18, "Update gagal", WHITE, BLACK);
+    ssd1306_draw_string_adafruit(0, 4, 28, "Cek WiFi/coba", WHITE, BLACK);
+    ssd1306_draw_string_adafruit(0, 20, 38, "lagi.", WHITE, BLACK);
+    ssd1306_draw_string_adafruit(0, 2, 56, "< OK", WHITE, BLACK);
     ssd1306_refresh(0, true);
 }

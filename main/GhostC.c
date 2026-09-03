@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "globals.h"
 #include "wifi_sys.h"
 #include "weblog_sys.h"
@@ -63,6 +64,12 @@ void app_main(void) {
     // ke-capture ke web viewer (lihat weblog_sys.h buat penjelasan
     // kenapa ini ada: 1 kabel USB-C aja, kepake buat ngetes).
     weblog_hook_install();
+
+    // Tandain partition yang lagi jalan ini "valid" — kalau abis OTA
+    // firmware baru ternyata gagal boot / crash-loop, bootloader bakal
+    // otomatis rollback balik ke firmware lama (butuh baris ini biar
+    // firmware yang SEKARANG juga ke-mark valid, bukan cuma yang baru).
+    esp_ota_mark_app_valid_cancel_rollback();
 
     ESP_LOGI("JirStore", "Booting...");
     wifi_init();
