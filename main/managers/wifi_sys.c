@@ -154,6 +154,9 @@ static void _wifi_event_handler(void *arg, esp_event_base_t base,
                 strncpy(wifiList[i].ssid, (char *)records[i].ssid, 32);
                 wifiList[i].ssid[32] = '\0';
                 wifiList[i].has_pass = (records[i].authmode != WIFI_AUTH_OPEN);
+                // AP hidden gak nyiarin nama-nya sama sekali, jadi field
+                // ssid balik dari scan bakal kosong ("") — itu tandanya.
+                wifiList[i].hidden   = (wifiList[i].ssid[0] == '\0');
                 wifiList[i].rssi     = records[i].rssi;
             }
 

@@ -26,8 +26,10 @@
 // STRUCT AP (hasil scan)
 // ============================================================
 typedef struct {
-    char ssid[33];      // Nama WiFi
+    char ssid[33];      // Nama WiFi (kosong "" kalau hidden — ESP32 emang
+                         // gak bisa tau nama AP yang sengaja disembunyiin)
     bool has_pass;      // false = open, true = butuh password
+    bool hidden;        // true = SSID disembunyiin (broadcast kosong)
     int  rssi;          // Signal strength (makin gede makin bagus)
 } WifiAP;
 

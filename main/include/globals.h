@@ -30,8 +30,8 @@
 // 8  = Reboot
 // 9  = Aksi Bayar (BAYAR / QRIS)
 // 10 = Layar QRIS
-// 11 = TRX Berhasil
-// 12 = TRX Gagal
+// 11 = TRX Berhasil / Timeout / Gagal (satu layar, beda tampilan
+//      tergantung trxberhasil/trxtimeout — cuma bisa "kembali" ke home)
 // 30 = Input PIN Transaksi (sebelum eksekusi TF/BAYAR dari layar 9 —
 //      QRIS TIDAK butuh PIN, langsung ke layar 10)
 // 31 = Input PIN Lama (Settings > Edit PIN, verifikasi dulu)

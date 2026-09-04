@@ -57,7 +57,7 @@ void init_joystick() {
 // TASK DISPLAY UTAMA
 // appMode 0  → menu logo + submenu
 // appMode 1  → brightness
-// appMode 2-6, 9-12 → store (satu fungsi)
+// appMode 2-6, 9-11 → store (satu fungsi)
 // appMode 7  → about
 // appMode 8  → reboot
 // appMode 13-17 → WiFi (list/password/connecting/sukses/gagal)
@@ -505,10 +505,39 @@ typedef struct {
     char userid[20];
     char zoneid[20];
     char gameslug[20];
-    
+    int  gen;   // Nomor generasi request ini — dipakai CEK_NICKNAME buat
+                // buang hasil yang udah BASI (lihat penjelasan di bawah)
 } CekProdukParam;
 
 static volatile bool s_cekProdukJalan = false;
+
+// ==========================================================
+// BUG: nickname ketemu -> muncul -> tau-tau balik "Tidak Ditemukan"
+// (kadang disertai layar delay/glitch)
+//
+// Penyebabnya RACE CONDITION antara task background (task_cek_produk)
+// sama layar (appMode 6). Skenarionya:
+//   1. User di layar 6, checkstatus masih false -> task cek nickname A
+//      dijalankan (network, bisa lambat).
+//   2. SEBELUM task A itu selesai, user udah pindah2 layar (mis. OK ke 9
+//      terus LEFT balik ke 6 lagi) -> checkstatus di-reset false lagi ->
+//      pengen mulai task BARU, tapi task A masih jalan (s_cekProdukJalan
+//      masih true) jadi nunggu.
+//   3. Task A (yang harusnya udah gak relevan) akhirnya selesai duluan
+//      dan nulis ke nickname/ceknickgagal/checkstatus GLOBAL — nimpa
+//      apapun yang harusnya ditampilin sekarang. Kadang hasilnya beda
+//      (server flaky / timing beda), makanya kelihatan "nickname ketemu
+//      lalu ilang lagi" secara acak & disertai delay pas nunggu task lama
+//      itu kelar.
+//
+// FIX: setiap kali mulai request nickname BARU, naikin s_nickCheckGen.
+// Task nyimpen nomor generasi saat DIA dibuat (cp->gen). Begitu task
+// selesai, dia cuma boleh nulis hasil ke variabel global KALAU
+// cp->gen == s_nickCheckGen saat ini (artinya emang request TERBARU).
+// Kalau enggak (ada request lebih baru yang udah jalan setelahnya),
+// hasilnya dibuang gitu aja — gak nimpa apa-apa.
+// ==========================================================
+static volatile int s_nickCheckGen = 0;
 
 
 static void task_cek_produk(void *param) {
@@ -553,25 +582,42 @@ snprintf(buff, sizeof(buff), "https://cek.topupgaming.com/api/game/%s?id=%s&zone
 
     HttpResp *res = fetch(buff);
 
+    // Request ini masih request TERBARU? Kalau user udah sempet mulai
+    // request lain lagi (gen berubah) selagi ini jalan, hasil ini BASI —
+    // jangan ditulis ke layar, itu yang bikin nickname "flip" balik jadi
+    // Tidak Ditemukan padahal sebenarnya udah ketemu.
+    bool masihRelevan = (cp->gen == s_nickCheckGen);
+
     if (!res) {
         ESP_LOGE(TAG_PRODUK, "GET NICKNAME GAGAL");
-        ceknickgagal = true;
+        if (masihRelevan) ceknickgagal = true;
     } else {
       bool status = resp_bool(res, "status");
        if (status == true) {
 cJSON *data = resp_obj(res, "data");
 const char *uname = obj_str(data, "username");
-if (uname) {
-    strncpy(nickname, uname, sizeof(nickname) - 1);  
-    nickname[sizeof(nickname) - 1] = '\0';
+if (masihRelevan) {
+    if (uname) {
+        strncpy(nickname, uname, sizeof(nickname) - 1);
+        nickname[sizeof(nickname) - 1] = '\0';
+        ceknickgagal = false;  // WAJIB direset di sini — dulu cuma di-set
+                                // true pas gagal, gak pernah di-set false
+                                // lagi pas sukses, jadi kalau ada percobaan
+                                // gagal sebelumnya, flag "gagal" itu nyangkut
+                                // terus walau percobaan berikutnya sukses
+    } else {
+        ceknickgagal = true;
+    }
 }
      } else {
-     ceknickgagal = true;
+     if (masihRelevan) ceknickgagal = true;
      }   
     }
 
     if (res) fetch_free(res);
-    checkstatus      = true;
+    // s_cekProdukJalan WAJIB selalu dibebasin walau hasilnya basi, biar
+    // slot buat request berikutnya gak nyangkut nunggu selamanya.
+    if (masihRelevan) checkstatus = true;
     s_cekProdukJalan = false;
 } else if (cp->tipe == SEND_ITEM) {
     char reffId[32];
@@ -722,8 +768,7 @@ static void drawCharCarousel(uint8_t id, uint8_t yBox, const char *cs, int len, 
 // appMode 6  = Konfirmasi
 // appMode 9  = Aksi Bayar
 // appMode 10 = QRIS
-// appMode 11 = TRX Berhasil
-// appMode 12 = TRX Gagal
+// appMode 11 = TRX Berhasil / Timeout / Gagal (satu layar)
 // ==========================================================
 void tampilkanStore() {
     ssd1306_clear(0);
@@ -763,7 +808,7 @@ void tampilkanStore() {
             ssd1306_draw_string_adafruit(0, 84, y+1, hBuf, tc, bc);
         }
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "<<BACK", BLACK, WHITE);
         ssd1306_draw_string_adafruit(0, 104, 56, "[OK]",   BLACK, WHITE);
     }
 
@@ -814,11 +859,11 @@ if (itemtersedia == true) {
         ssd1306_draw_string_adafruit(0, 5, 44, buf,      WHITE, BLACK);
 
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "<<BACK", BLACK, WHITE);
         ssd1306_draw_string_adafruit(0, 92, 56, "[BELI]", BLACK, WHITE);
 } else {
 ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
-        ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 2, 56, "<<BACK", WHITE, BLACK);
         }
 }
 
@@ -867,7 +912,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
             }
         }
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "<<BACK", BLACK, WHITE);
         ssd1306_draw_string_adafruit(0, 92, 56, "[EDIT]", BLACK, WHITE);
     }
 
@@ -877,10 +922,11 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
     // [ANGKA] 0-9 (default) — max 9 klik buat semua digit
     // [HURUF] A-Z + simbol  — buat email, nama, dll
     //
-    // > = ganti karakter (tahan = makin cepat)
-    // OK     = tambah karakter  |  2x OK  = SELESAI field
-    // < = hapus karakter        |  2x <   = BATAL (hapus semua)
-    // < saat buffer kosong      = GANTI MODE (ANGKA↔HURUF)
+    // klik kanan / tahan kanan = karakter berikutnya (tahan = auto-repeat)
+    // klik kiri 1x  = karakter sebelumnya
+    // klik kiri 2x  = ADA isi -> hapus 1 karakter | KOSONG -> ganti mode
+    // tahan kiri    = SELESAI, balik ke daftar field
+    // OK            = tambah karakter yang lagi kepilih
     // ======================================================
     else if (appMode == 5) {
         // Charset dari globals.h (satu sumber, sinkron sama input_system.c —
@@ -935,17 +981,50 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
     
     const StoreProduk *p = storeGetItem(katKursor, subKursor, itemDipilih);
 
+    // Cache kombinasi terakhir yang SUKSES dicek. User sering bolak-balik
+    // layar 6 (Konfirmasi) <-> 9 (Aksi Bayar) sebelum bener2 bayar (mis.
+    // mau ganti metode bayar) — appMode 9 balikin ke 6 tanpa checkstatus
+    // di-reset, jadi kalau field-nya SAMA persis kayak yang barusan
+    // berhasil dicek, gak perlu nembak network lagi (itu yang bikin
+    // "Checking Nickname" nongol lama & delay tiap kali cuma gonta-ganti
+    // metode pembayaran doang). Kalau percobaan terakhir GAGAL, tetap
+    // dicek ulang (siapa tau server sempet gangguan doang).
+    static char s_lastNickKey[80] = "";
+    static bool s_lastNickSukses  = false;
+
+    char curKey[80];
+    snprintf(curKey, sizeof(curKey), "%s|%s|%s",
+             field[0].value,
+             (totalField == 2) ? field[1].value : "",
+             getGameSlug(subKursor));
+
+    // Barusan kelar dicek (bukan dari cache) & hasilnya sukses -> catat,
+    // biar lain kali balik ke kombinasi yang sama gak perlu network lagi.
+    if (katKursor == 0 && checkstatus && !ceknickgagal &&
+        strcmp(curKey, s_lastNickKey) == 0) {
+        s_lastNickSukses = true;
+    }
+
     // Cek nickname cuma buat kategori Diamond (game)
     if (katKursor == 0 && checkstatus == false) {
+
+        if (s_lastNickSukses && strcmp(curKey, s_lastNickKey) == 0) {
+            // Sama kayak yang barusan sukses dicek -> pakai hasil yang
+            // udah ada (nickname & ceknickgagal gak disentuh), langsung
+            // tandain selesai tanpa mulai task baru.
+            checkstatus = true;
+        } else {
         ssd1306_draw_string_adafruit(0, 16, 28, "Checking Nickname", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 12, 40, "Mohon tunggu...", WHITE, BLACK);
         ssd1306_refresh(0, true);
 
         if (!s_cekProdukJalan) {
             s_cekProdukJalan = true;
+            s_nickCheckGen++;
             CekProdukParam *cp = calloc(1, sizeof(CekProdukParam));
             if (cp) {
                 cp->tipe = CEK_NICKNAME;
+                cp->gen  = s_nickCheckGen;
 
                 strncpy(cp->userid, field[0].value, sizeof(cp->userid) - 1);
                 cp->userid[sizeof(cp->userid) - 1] = '\0';
@@ -959,6 +1038,12 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
                 strncpy(cp->gameslug, getGameSlug(subKursor), sizeof(cp->gameslug) - 1);
                 cp->gameslug[sizeof(cp->gameslug) - 1] = '\0';
 
+                // Simpan key sekarang; ditandain "sukses" beneran di atas,
+                // di frame berikutnya setelah checkstatus balik true.
+                strncpy(s_lastNickKey, curKey, sizeof(s_lastNickKey) - 1);
+                s_lastNickKey[sizeof(s_lastNickKey) - 1] = '\0';
+                s_lastNickSukses = false;
+
                 xTaskCreate(task_cek_produk, "cek_nickname", 8192, cp, 5, NULL);
             } else {
                 ceknickgagal     = true;
@@ -967,7 +1052,8 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
             }
         }
         return;   // jangan gambar konten konfirmasi dulu selagi nunggu
-    } 
+        }
+    }
      
 
 
@@ -1011,7 +1097,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         }
 
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "<<BACK", BLACK, WHITE);
         ssd1306_draw_string_adafruit(0, 104, 56, "[OK]",   BLACK, WHITE);
         
     }
@@ -1043,7 +1129,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
             }
         }
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2, 56, "< BACK", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "<<BACK", BLACK, WHITE);
         ssd1306_draw_string_adafruit(0, 104, 56, "[OK]",   BLACK, WHITE);
     }
 
@@ -1072,7 +1158,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 61, 34, tmp, WHITE, BLACK);
 
         
-        ssd1306_draw_string_adafruit(0, 91, 57, "< BACK",   WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 91, 57, "<<BACK",   WHITE, BLACK);
         
     }
 
@@ -1135,7 +1221,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
 
         // Footer
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "<<HOME", BLACK, WHITE);
         } else if (trxberhasil == true) {
         ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 14, 1, "TRX BERHASIL", BLACK, WHITE);
@@ -1160,7 +1246,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
 
         // Footer
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "<<HOME", BLACK, WHITE);
         }
         } else {
         ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
@@ -1185,41 +1271,8 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0,37, 45, "Coba lagi!", WHITE, BLACK);
 
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "<<HOME", BLACK, WHITE);
         }
-    }
-
-    // ======================================================
-    // LAYAR 12: TRX GAGAL
-    // Ikon silang 32x32 pojok kiri-bawah + info di kanan
-    // < HOME
-    // ======================================================
-    else if (appMode == 12) {
-        const StoreProduk *p = storeGetItem(katKursor, subKursor, itemDipilih);
-
-        ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
-        ssd1306_draw_string_adafruit(0, 22, 1, "TRX GAGAL", BLACK, WHITE);
-
-        // Ikon silang 32x32 pojok kiri-bawah
-        oled_draw_bitmap(0,2,16,icon_silang_32,32,32,WHITE);
-        
-
-        // Panel kanan (x=35)
-        scrollTeks(p->nama, tmp, 13, true);
-        ssd1306_draw_string_adafruit(0,37, 12, tmp, WHITE, BLACK);
-
-        char hBuf[14];
-        formatHarga(p->harga, hBuf, sizeof(hBuf));
-        snprintf(buf, sizeof(buf), "Rp %s", hBuf);
-        ssd1306_draw_string_adafruit(0,37, 23, buf, WHITE, BLACK);
-
-        scrollTeks(targetID, tmp, 13, true);
-        ssd1306_draw_string_adafruit(0,37, 34, tmp, WHITE, BLACK);
-
-        ssd1306_draw_string_adafruit(0,37, 45, "Coba lagi!", WHITE, BLACK);
-
-        ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2, 56, "< HOME", BLACK, WHITE);
     }
 
     // ======================================================
@@ -1272,9 +1325,10 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         }
 
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
-        const char *lbl = (len > 0) ? "< HAPUS" : "< BATAL";
-        ssd1306_draw_string_adafruit(0, 2, 56, (char *)lbl, BLACK, WHITE);
-        if (!locked) ssd1306_draw_string_adafruit(0, 78, 56, "OK isi/tahan", BLACK, WHITE);
+        // 2x kiri = hapus 1 digit | tahan kiri = batal (selalu bisa,
+        // bahkan pas lockout) | OK = isi digit yang lagi kepilih
+        ssd1306_draw_string_adafruit(0, 2, 56, "2x<Hapus Tahan<Batal", BLACK, WHITE);
+        if (!locked) ssd1306_draw_string_adafruit(0, 100, 56, "OK", BLACK, WHITE);
     }
 
     // ======================================================
@@ -1288,7 +1342,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 10, 48, "PIN baru tersimpan", WHITE, BLACK);
 
         ssd1306_fill_rectangle(0, 0, 55, 128, 10, WHITE);
-        ssd1306_draw_string_adafruit(0, 2, 56, "< KEMBALI", BLACK, WHITE);
+        ssd1306_draw_string_adafruit(0, 2, 56, "<<KEMBALI", BLACK, WHITE);
     }
 
     
@@ -1308,22 +1362,33 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         } else if (wifiTotal == 0) {
             ssd1306_draw_string_adafruit(0, 10, 20, "Tidak ada", WHITE, BLACK);
             ssd1306_draw_string_adafruit(0, 10, 34, "jaringan.", WHITE, BLACK);
-            ssd1306_draw_string_adafruit(0, 0, 54, "< Kembali", WHITE, BLACK);
+            ssd1306_draw_string_adafruit(0, 0, 54, "<<Kembali", WHITE, BLACK);
         } else {
             for (int i = 0; i < 3; i++) {
                 int idx = wifiScroll + i;
                 if (idx >= wifiTotal) break;
                 int y = 12 + i * 17;
                 if (idx == wifiKursor) ssd1306_fill_rectangle(0, 0, y-1, 128, 15, WHITE);
+                // Badge: [H] muncul kalau hidden, digabung sama [*]/[O]
+                // buat nunjukkin ada password apa enggak — jadi:
+                //   [H][*] = hidden + berpassword
+                //   [H][O] = hidden + open (tanpa password)
+                //   [*]    = keliatan + berpassword
+                //   [O]    = keliatan + open
+                // SSID hidden gak ada namanya (broadcast kosong) jadi
+                // ditampilin "(Hidden)" biar gak muncul baris kosong.
+                const char *lock  = wifiList[idx].has_pass ? "[*]" : "[O]";
+                char badge[8];
+                snprintf(badge, sizeof(badge), "%s%s",
+                         wifiList[idx].hidden ? "[H]" : "", lock);
+                const char *nama  = wifiList[idx].hidden ? "(Hidden)" : wifiList[idx].ssid;
                 char baris[40];
-                snprintf(baris, sizeof(baris), "%s%.32s",
-                    wifiList[idx].has_pass ? "[*]" : "[O]",
-                    wifiList[idx].ssid);
+                snprintf(baris, sizeof(baris), "%s%.32s", badge, nama);
                 ssd1306_draw_string_adafruit(0, 2, y+1, baris,
                     (idx == wifiKursor) ? BLACK : WHITE,
                     (idx == wifiKursor) ? WHITE : BLACK);
             }
-            ssd1306_draw_string_adafruit(0, 0, 56, "< Batal  OK Pilih", WHITE, BLACK);
+            ssd1306_draw_string_adafruit(0, 0, 56, "<<Batal OK Pilih", WHITE, BLACK);
         }
     }
 
@@ -1369,7 +1434,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         snprintf(posStr, sizeof(posStr), "%d/%d", ci14+1, csLen14);
         ssd1306_draw_string_adafruit(0, 90, 47, posStr, WHITE, BLACK);
 
-        ssd1306_draw_string_adafruit(0, 0, 56, "OK=+  TahanOK=Connect", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 0, 56, "OK=+ Tahan<=Konek", WHITE, BLACK);
     }
 
     // ======================================================
@@ -1379,7 +1444,9 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_clear(0);
         ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 2, 1, "Menghubungkan...", BLACK, WHITE);
-        ssd1306_draw_string_adafruit(0, 4, 18, wifiList[wifiKursor].ssid, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 4, 18,
+            wifiList[wifiKursor].hidden ? "(Hidden)" : wifiList[wifiKursor].ssid,
+            WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 10, 40, "Mohon tunggu...", WHITE, BLACK);
     }
 
@@ -1393,7 +1460,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 4, 14, wifiConnectedSSID, WHITE, BLACK);
         const char *ip = wifi_get_ip();
         ssd1306_draw_string_adafruit(0, 4, 30, ip ? ip : "-", WHITE, BLACK);
-        ssd1306_draw_string_adafruit(0, 0, 54, "< Kembali", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 0, 54, "<<Kembali", WHITE, BLACK);
     }
 
     // ======================================================
@@ -1403,9 +1470,11 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         ssd1306_clear(0);
         ssd1306_fill_rectangle(0, 0, 0, 128, 9, WHITE);
         ssd1306_draw_string_adafruit(0, 2, 1, "Gagal Konek!", BLACK, WHITE);
-        ssd1306_draw_string_adafruit(0, 10, 18, wifiList[wifiKursor].ssid, WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 10, 18,
+            wifiList[wifiKursor].hidden ? "(Hidden)" : wifiList[wifiKursor].ssid,
+            WHITE, BLACK);
         ssd1306_draw_string_adafruit(0, 4, 34, "Salah password?", WHITE, BLACK);
-        ssd1306_draw_string_adafruit(0, 0, 54, "< Coba lagi", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 0, 54, "<<Cobalagi", WHITE, BLACK);
     }
 
     // ======================================================
@@ -1420,7 +1489,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         if (cnt == 0) {
             ssd1306_draw_string_adafruit(0, 4, 22, "Belum ada wifi", WHITE, BLACK);
             ssd1306_draw_string_adafruit(0, 4, 34, "yang tersimpan.", WHITE, BLACK);
-            ssd1306_draw_string_adafruit(0, 0, 54, "< Kembali", WHITE, BLACK);
+            ssd1306_draw_string_adafruit(0, 0, 54, "<<Kembali", WHITE, BLACK);
         } else {
             for (int i = 0; i < 3; i++) {
                 int idx = savedWifiScroll + i;
@@ -1433,7 +1502,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
                 ssd1306_draw_string_adafruit(0, 2, y+1, baris,
                     sel ? BLACK : WHITE, sel ? WHITE : BLACK);
             }
-            ssd1306_draw_string_adafruit(0, 0, 56, "< Kembali OK Lihat", WHITE, BLACK);
+            ssd1306_draw_string_adafruit(0, 0, 56, "<<Kmbali OK Lihat", WHITE, BLACK);
         }
     }
 
@@ -1456,7 +1525,7 @@ ssd1306_draw_string_adafruit(0, 1, 28, "Produk Tidak Tersedia", WHITE, BLACK);
         scrollTeks(passS, tmp, 20, true);
         ssd1306_draw_string_adafruit(0, 2, 46, tmp, WHITE, BLACK);
 
-        ssd1306_draw_string_adafruit(0, 0, 56, "<Kembali  OK=Hapus", WHITE, BLACK);
+        ssd1306_draw_string_adafruit(0, 0, 56, "<<Kmbali OK=Hapus", WHITE, BLACK);
     }
 
     // Satu-satunya ssd1306_refresh buat SEMUA layar toko (2-6, 9-19).

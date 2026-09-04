@@ -29,6 +29,110 @@ uint32_t ms() { return (uint32_t)(esp_timer_get_time() / 1000); }
 void handleStoreInput(int btn);
 
 // ==========================================================
+// MENU NAV — skema klik/tahan KHUSUS buat layar PILIHAN MENU aja:
+//   layar 0  (Menu Utama: carousel + submenu)
+//   layar 2  (Daftar Item)
+//   layar 4  (Daftar Field input)
+//   layar 9  (Pilih metode Bayar)
+//   layar 13 (Daftar WiFi)
+//   layar 18 (Saved WiFi)
+//
+//   klik   KIRI  1x  = pilihan SEBELUMNYA
+//   tahan  KIRI      = KEMBALI ke layar sebelumnya
+//   klik   KANAN 1x  = pilihan SELANJUTNYA
+//   tahan  KANAN     = pilihan SELANJUTNYA terus, geser makin cepet
+//                       (auto-repeat kayak nge-hold tombol keyboard)
+//   klik   OK        = PILIH
+//
+// Layar SELAIN yang di atas (konfirmasi, detail item, keyboard/PIN, dll)
+// TETAP pakai mekanisme ASLI (klik kiri langsung = kembali, gak perlu
+// ditahan) — persis kayak sebelum sistem menu baru ini ada.
+// ==========================================================
+typedef enum {
+    JEV_NONE = 0,
+    JEV_LEFT_CLICK,     // klik kiri     -> SEBELUMNYA
+    JEV_LEFT_HOLD,      // tahan kiri    -> KEMBALI
+    JEV_RIGHT_CLICK,    // klik kanan    -> SELANJUTNYA
+    JEV_RIGHT_REPEAT,   // tahan kanan   -> SELANJUTNYA (berulang, auto-repeat)
+    JEV_OK_CLICK,       // klik OK       -> PILIH
+} JoyEvent;
+
+#define MENU_HOLD_MS          450  // tahan kiri >= ini baru dianggap "tahan"
+#define MENU_REPEAT_START_MS  300  // tahan kanan >= ini baru mulai auto-repeat
+#define MENU_DEBOUNCE_MS      150  // redam noise mekanik antar klik
+
+static JoyEvent pollMenuNav(void) {
+    static bool     lPrev = false, rPrev = false, oPrev = false;
+    static uint32_t tLDown = 0, tRDown = 0, tRRep = 0;
+    static bool     lHoldFired = false;
+    static uint32_t lastLClick = 0, lastRClick = 0, lastOClick = 0;
+
+    uint32_t now = ms();
+    bool lDown = (gpio_get_level(PIN_LEFT)  == 0);
+    bool rDown = (gpio_get_level(PIN_RIGHT) == 0);
+    bool oDown = (gpio_get_level(PIN_OK)    == 0);
+
+    JoyEvent ev = JEV_NONE;
+
+    // ---- KIRI: dilepas sebelum MENU_HOLD_MS = klik (SEBELUMNYA) |
+    //            ditahan sampai MENU_HOLD_MS  = tahan (KEMBALI) ----
+    if (lDown) {
+        if (!lPrev) {
+            tLDown = now; lHoldFired = false;
+        } else if (!lHoldFired && (now - tLDown >= MENU_HOLD_MS)) {
+            lHoldFired = true;
+            if (now - lastLClick >= MENU_DEBOUNCE_MS) {
+                lastLClick = now;
+                ev = JEV_LEFT_HOLD;
+            }
+        }
+    } else if (lPrev && !lHoldFired) {
+        if (now - lastLClick >= MENU_DEBOUNCE_MS) {
+            lastLClick = now;
+            ev = JEV_LEFT_CLICK;
+        }
+    }
+    lPrev = lDown;
+    if (ev != JEV_NONE) { rPrev = rDown; oPrev = oDown; return ev; }
+
+    // ---- KANAN: klik pas baru ditekan, abis itu auto-repeat makin
+    //             ngebut selama ditahan ----
+    if (rDown) {
+        if (!rPrev) {
+            tRDown = now; tRRep = now;
+            if (now - lastRClick >= MENU_DEBOUNCE_MS) {
+                lastRClick = now;
+                ev = JEV_RIGHT_CLICK;
+            }
+        } else {
+            uint32_t d  = now - tRDown;
+            uint32_t iv = (d > 900) ? 25 : (d > 500) ? 50 : (d > MENU_REPEAT_START_MS) ? 90 : 0;
+            if (iv > 0 && now - tRRep >= iv) {
+                tRRep = now;
+                ev = JEV_RIGHT_REPEAT;
+            }
+        }
+    }
+    rPrev = rDown;
+    if (ev != JEV_NONE) { oPrev = oDown; return ev; }
+
+    // ---- OK: klik doang ----
+    if (oDown && !oPrev) {
+        if (now - lastOClick >= MENU_DEBOUNCE_MS) {
+            lastOClick = now;
+            ev = JEV_OK_CLICK;
+        }
+    }
+    oPrev = oDown;
+    return ev;
+}
+
+// Klik-kanan ATAU tahan-kanan (repeat) — dua-duanya "maju satu langkah"
+#define IS_NEXT(ev) ((ev) == JEV_RIGHT_CLICK || (ev) == JEV_RIGHT_REPEAT)
+
+static void handleMenuNav(JoyEvent ev);
+
+// ==========================================================
 // BUILD targetID
 // ML (ada Zone ID): "idGame|zoneID"
 // Lainnya         : langsung value
@@ -78,8 +182,11 @@ static void pinHandleSelesai(void) {
 
     if (appMode == 30) {
         // PIN transaksi benar -> eksekusi TF/BAYAR
-        // TODO: panggil API H2H di sini. Hasil API -> appMode 11 (berhasil)
-        // atau 12 (gagal). Untuk placeholder, langsung ke TRX Berhasil:
+        // TODO: panggil API H2H di sini. Hasil API -> appMode 11 (satu
+        // layar buat berhasil/timeout/gagal, ditentukan trxberhasil /
+        // trxtimeout — lihat display_system.c). Untuk placeholder,
+        // langsung ke situ, task SEND_ITEM di layar itu yang nentuin
+        // status akhirnya:
         appMode = 11;
     } else if (appMode == 31) {
         appMode = 32; // PIN lama benar -> lanjut input PIN baru
@@ -383,7 +490,17 @@ if (appMode == 5) {
         return;
     }
 
-    // ---- Debounce normal untuk semua mode lain ----
+    // ---- LAYAR PILIHAN MENU (0, 2, 4, 9, 13, 18) — skema klik/tahan baru ----
+    if (appMode == 0 || appMode == 2 || appMode == 4 || appMode == 9 ||
+        appMode == 13 || appMode == 18) {
+        JoyEvent ev = pollMenuNav();
+        if (ev == JEV_NONE) return;
+        handleMenuNav(ev);
+        return;
+    }
+
+    // ---- Debounce normal untuk semua mode lain (SAMA PERSIS kayak
+    // sebelumnya — klik langsung = aksi, gak ada tahan) ----
     if (now - lastPress < 250) return;
 
     int btn = BTN_NONE;
@@ -393,8 +510,9 @@ if (appMode == 5) {
     if (btn == BTN_NONE) return;
     lastPress = now;
 
-    // Delegasi ke store handler (layar 2-6, 9-12, dan konfirmasi PIN 35)
-    if ((appMode >= 2 && appMode <= 6) || (appMode >= 9 && appMode <= 12) ||
+    // Delegasi ke store handler (layar 3, 6, 10, 11, dan konfirmasi PIN 35 —
+    // 2, 4, 9 udah ditangani duluan di atas lewat handleMenuNav)
+    if (appMode == 3 || appMode == 6 || appMode == 10 || appMode == 11 ||
         appMode == 35) {
         handleStoreInput(btn); return;
     }
@@ -443,47 +561,6 @@ if (appMode == 5) {
         return;
     }
 
-
-    // ---- WIFI LIST (mode 13) ----
-    if (appMode == 13) {
-        if (wifiStatus == WIFI_STATUS_SCANNING) return;
-        if (btn == BTN_LEFT) {
-            if (wifiKursor > 0) {
-                wifiKursor--;
-                if (wifiKursor < wifiScroll) wifiScroll--;
-            } else {
-                appMode = 0; diSubMenu = true; katKursor = 3; subKursor = 3;
-            }
-        } else if (btn == BTN_RIGHT) {
-            if (wifiKursor < wifiTotal - 1) {
-                wifiKursor++;
-                if (wifiKursor >= wifiScroll + 3) wifiScroll++;
-            }
-        } else if (btn == BTN_OK && wifiTotal > 0) {
-            if (wifiList[wifiKursor].has_pass) {
-                char saved[64];
-                if (wifi_saved_lookup(wifiList[wifiKursor].ssid, saved, sizeof(saved))) {
-                    // Password buat SSID ini udah tersimpan — langsung
-                    // connect, gak perlu ngetik ulang tiap kali.
-                    strncpy(wifiPassBuf, saved, sizeof(wifiPassBuf) - 1);
-                    wifiPassBuf[sizeof(wifiPassBuf) - 1] = '\0';
-                    wifi_connect_selected();
-                    appMode = 15;
-                } else {
-                    memset(wifiPassBuf, 0, sizeof(wifiPassBuf));
-                    charIdx    = 0;
-                    inputAngka = true; // Reset ke mode ANGKA tiap mulai ngetik baru
-                    appMode    = 14;
-                }
-            } else {
-                wifiPassBuf[0] = '\0';
-                wifi_connect_selected();
-                appMode = 15;
-            }
-        }
-        return;
-    }
-
     // ---- WIFI SUKSES (mode 16) ----
     if (appMode == 16) {
         if (btn == BTN_LEFT) {
@@ -502,28 +579,6 @@ if (appMode == 5) {
         return;
     }
 
-    // ---- SAVED WIFI LIST (mode 18) ----
-    // > geser | < kembali ke Settings | OK lihat detail (password + hapus)
-    if (appMode == 18) {
-        int cnt = wifi_saved_count();
-        if (btn == BTN_LEFT) {
-            if (savedWifiKursor > 0) {
-                savedWifiKursor--;
-                if (savedWifiKursor < savedWifiScroll) savedWifiScroll--;
-            } else {
-                appMode = 0; diSubMenu = true; katKursor = 3; subKursor = 4;
-            }
-        } else if (btn == BTN_RIGHT) {
-            if (savedWifiKursor < cnt - 1) {
-                savedWifiKursor++;
-                if (savedWifiKursor >= savedWifiScroll + 3) savedWifiScroll++;
-            }
-        } else if (btn == BTN_OK && cnt > 0) {
-            appMode = 19;
-        }
-        return;
-    }
-
     // ---- SAVED WIFI DETAIL (mode 19) ----
     // < kembali ke list | OK = hapus entry ini
     if (appMode == 19) {
@@ -537,34 +592,52 @@ if (appMode == 5) {
         }
         return;
     }
+}
 
-    // ---- MENU UTAMA (layar 0) ----
+// ==========================================================
+// HANDLE MENU NAV — khusus layar PILIHAN MENU (0, 2, 4, 9, 13, 18)
+// ==========================================================
+static void handleMenuNav(JoyEvent ev) {
+    // --------------------------------------------------
+    // LAYAR 0: MENU UTAMA (carousel kategori + submenu)
+    // --------------------------------------------------
     if (appMode == 0) {
         if (!diSubMenu) {
-            // Carousel logo — > = next | < = prev | OK = masuk submenu
-            if (btn == BTN_RIGHT) {
+            // Carousel logo — klik kanan/tahan kanan = next | klik kiri =
+            // prev | OK = masuk submenu. Ini layar HOME, gak ada "kembali"
+            // lagi di atasnya, jadi tahan kiri gak ngapa2in di sini.
+            if (IS_NEXT(ev)) {
                 katIdx   = (katIdx + 1) % 4;
                 katKursor= katIdx;
-                katArah  = 1; katAnim = true; katAnimT = now;
-            } else if (btn == BTN_LEFT) {
+                katArah  = 1; katAnim = true; katAnimT = ms();
+            } else if (ev == JEV_LEFT_CLICK) {
                 katIdx   = (katIdx - 1 + 4) % 4;
                 katKursor= katIdx;
-                katArah  = -1; katAnim = true; katAnimT = now;
-            } else if (btn == BTN_OK) {
+                katArah  = -1; katAnim = true; katAnimT = ms();
+            } else if (ev == JEV_OK_CLICK) {
                 diSubMenu = true; katKursor = katIdx;
                 subKursor = 0;    atasMenu  = 0;
             }
         } else {
-            // List submenu — > = geser | < = balik carousel | OK = pilih
+            // List submenu — klik kanan/tahan kanan = geser maju | klik
+            // kiri = geser mundur | tahan kiri = balik ke carousel | OK = pilih
             int lim = totalSubKat[katKursor];
-            if (btn == BTN_RIGHT) {
+            if (ev == JEV_LEFT_HOLD) {
+                diSubMenu = false; atasMenu = 0;
+            } else if (IS_NEXT(ev)) {
                 if (subKursor < lim-1) {
                     subKursor++;
                     if (subKursor >= atasMenu + 5) atasMenu++;
                 } else { subKursor = 0; atasMenu = 0; }
-            } else if (btn == BTN_LEFT) {
-                diSubMenu = false; atasMenu = 0;
-            } else if (btn == BTN_OK) {
+            } else if (ev == JEV_LEFT_CLICK) {
+                if (subKursor > 0) {
+                    subKursor--;
+                    if (subKursor < atasMenu) atasMenu--;
+                } else {
+                    subKursor = lim - 1;
+                    atasMenu  = (lim > 5) ? lim - 5 : 0;
+                }
+            } else if (ev == JEV_OK_CLICK) {
                 if (katKursor == 3) {
                     // Settings
                     if      (subKursor == 0) appMode = 1;
@@ -587,43 +660,184 @@ if (appMode == 5) {
                 }
             }
         }
+        return;
     }
-}
-
-// ==========================================================
-// HANDLE INPUT SEMUA LAYAR STORE
-// ==========================================================
-void handleStoreInput(int btn) {
-    static uint32_t tLeft = 0;  // Terakhir tekan Left (buat double-click BATAL)
-    #define DBL 200              // Window double-click (ms)
-
-    uint32_t now = ms();
 
     // --------------------------------------------------
     // LAYAR 2: DAFTAR ITEM
-    // > scroll | < kembali | OK pilih
+    // klik kanan/tahan kanan = item berikutnya | klik kiri = item
+    // sebelumnya | tahan kiri = kembali ke submenu | OK = pilih
     // --------------------------------------------------
     if (appMode == 2) {
         int tot = storeGetTotal(katKursor, subKursor);
-        if (btn == BTN_RIGHT) {
+        if (IS_NEXT(ev)) {
             int abs = itemScroll + itemKursor;
             if (abs < tot-1) {
                 if (itemKursor < 2) itemKursor++;
                 else itemScroll++;
             } else { itemKursor=0; itemScroll=0; }
-        } else if (btn == BTN_LEFT) {
+        } else if (ev == JEV_LEFT_CLICK) {
+            int abs = itemScroll + itemKursor;
+            if (abs > 0) {
+                if (itemKursor > 0) itemKursor--;
+                else itemScroll--;
+            } else if (tot > 0) {
+                int last = tot - 1;
+                itemKursor = (last < 2) ? last : 2;
+                itemScroll = last - itemKursor;
+            }
+        } else if (ev == JEV_LEFT_HOLD) {
             appMode=0; diSubMenu=true; katKursor=katKursor; subKursor=subKursor;
-        } else if (btn == BTN_OK && tot > 0) {
+        } else if (ev == JEV_OK_CLICK && tot > 0) {
             itemDipilih = itemScroll + itemKursor;
             appMode = 3;
         }
+        return;
     }
+
+    // --------------------------------------------------
+    // LAYAR 4: LIST INPUT FIELD
+    // klik kanan/tahan kanan = field berikutnya | klik kiri = field
+    // sebelumnya | tahan kiri = kembali ke daftar item | OK = edit/konfirmasi
+    // --------------------------------------------------
+    if (appMode == 4) {
+        int totRow = totalField + 1;
+        if (IS_NEXT(ev)) {
+            fieldKursor = (fieldKursor + 1) % totRow;
+        } else if (ev == JEV_LEFT_CLICK) {
+            fieldKursor = (fieldKursor - 1 + totRow) % totRow;
+        } else if (ev == JEV_LEFT_HOLD) {
+            appMode = 2;
+        } else if (ev == JEV_OK_CLICK) {
+            if (fieldKursor < totalField) {
+                // Edit field → ke input karakter (layar 5, mekanisme ASLI:
+                // tap/tahan OK, dll — gak kesentuh sama sekali)
+                charIdx    = 0;
+                inputAngka = true; // Reset ke mode ANGKA setiap mulai field baru
+                appMode    = 5;
+            } else {
+                // Tombol KONFIRMASI — cek semua field terisi
+                bool ok = true;
+                for (int f = 0; f < totalField; f++)
+                    if (!strlen(field[f].value)) { ok=false; break; }
+                if (ok) {
+                appMode = 6;
+                buildTargetID();
+                }
+            }
+        }
+        return;
+    }
+
+    // --------------------------------------------------
+    // LAYAR 9: AKSI BAYAR (BAYAR / QRIS) — 2 opsi
+    // klik kanan / klik kiri = ganti pilihan | tahan kiri = kembali ke
+    // Konfirmasi | OK = eksekusi
+    // --------------------------------------------------
+    if (appMode == 9) {
+        if (IS_NEXT(ev) || ev == JEV_LEFT_CLICK) {
+            caraBayar = (caraBayar == 0) ? 1 : 0;
+        } else if (ev == JEV_LEFT_HOLD) {
+            appMode = 6;
+        } else if (ev == JEV_OK_CLICK) {
+            if (caraBayar == 1) {
+                appMode = 10; // QRIS -> tampilkan langsung, gak perlu PIN
+            } else {
+                // TF/BAYAR -> wajib PIN dulu (layar 30, mekanisme ASLI)
+                memset(pinBuf, 0, sizeof(pinBuf));
+                pinPrev = 0;
+                appMode = 30;
+            }
+        }
+        return;
+    }
+
+    // --------------------------------------------------
+    // LAYAR 13: DAFTAR WIFI
+    // klik kanan / tahan kanan = AP berikutnya (auto-repeat) | klik kiri =
+    // AP sebelumnya | tahan kiri = balik ke Settings | OK = konek
+    // --------------------------------------------------
+    if (appMode == 13) {
+        if (wifiStatus == WIFI_STATUS_SCANNING) return;
+        if (ev == JEV_LEFT_HOLD) {
+            appMode = 0; diSubMenu = true; katKursor = 3; subKursor = 3;
+        } else if (ev == JEV_LEFT_CLICK) {
+            if (wifiKursor > 0) {
+                wifiKursor--;
+                if (wifiKursor < wifiScroll) wifiScroll--;
+            }
+        } else if (IS_NEXT(ev)) {
+            if (wifiKursor < wifiTotal - 1) {
+                wifiKursor++;
+                if (wifiKursor >= wifiScroll + 3) wifiScroll++;
+            }
+        } else if (ev == JEV_OK_CLICK && wifiTotal > 0) {
+            if (wifiList[wifiKursor].has_pass) {
+                char saved[64];
+                if (wifi_saved_lookup(wifiList[wifiKursor].ssid, saved, sizeof(saved))) {
+                    // Password buat SSID ini udah tersimpan — langsung
+                    // connect, gak perlu ngetik ulang tiap kali.
+                    strncpy(wifiPassBuf, saved, sizeof(wifiPassBuf) - 1);
+                    wifiPassBuf[sizeof(wifiPassBuf) - 1] = '\0';
+                    wifi_connect_selected();
+                    appMode = 15;
+                } else {
+                    memset(wifiPassBuf, 0, sizeof(wifiPassBuf));
+                    charIdx    = 0;
+                    inputAngka = true; // Reset ke mode ANGKA tiap mulai ngetik baru
+                    appMode    = 14;   // layar keyboard password — mekanisme ASLI
+                }
+            } else {
+                wifiPassBuf[0] = '\0';
+                wifi_connect_selected();
+                appMode = 15;
+            }
+        }
+        return;
+    }
+
+    // --------------------------------------------------
+    // LAYAR 18: SAVED WIFI LIST
+    // klik kanan/tahan kanan = geser | klik kiri = mundur | tahan kiri =
+    // kembali ke Settings | OK = lihat detail
+    // --------------------------------------------------
+    if (appMode == 18) {
+        int cnt = wifi_saved_count();
+        if (ev == JEV_LEFT_HOLD) {
+            appMode = 0; diSubMenu = true; katKursor = 3; subKursor = 4;
+        } else if (ev == JEV_LEFT_CLICK) {
+            if (savedWifiKursor > 0) {
+                savedWifiKursor--;
+                if (savedWifiKursor < savedWifiScroll) savedWifiScroll--;
+            }
+        } else if (IS_NEXT(ev)) {
+            if (savedWifiKursor < cnt - 1) {
+                savedWifiKursor++;
+                if (savedWifiKursor >= savedWifiScroll + 3) savedWifiScroll++;
+            }
+        } else if (ev == JEV_OK_CLICK && cnt > 0) {
+            appMode = 19;
+        }
+        return;
+    }
+}
+
+// ==========================================================
+// HANDLE INPUT SEMUA LAYAR STORE — layar 3, 5, 6, 10, 11, 35 (mekanisme
+// ASLI, klik langsung = aksi). Layar 2, 4, 9 udah dipindah ke
+// handleMenuNav() di atas.
+// ==========================================================
+void handleStoreInput(int btn) {
+    static uint32_t tLeft = 0;  // Terakhir tekan Left (buat double-click BATAL, layar 5)
+    #define DBL 200              // Window double-click (ms)
+
+    uint32_t now = ms();
 
     // --------------------------------------------------
     // LAYAR 3: DETAIL ITEM
     // < kembali | OK beli → setup field → layar 4
     // --------------------------------------------------
-    else if (appMode == 3) {
+    if (appMode == 3) {
      if (!checkstatus) {
         // Masih nunggu hasil cek produk dari server (task background) —
         // jangan proses OK/LEFT dulu biar gak kepencet berdasarkan status basi
@@ -646,35 +860,6 @@ void handleStoreInput(int btn) {
             checkstatus = false;
       }
       }
-    }
-
-    // --------------------------------------------------
-    // LAYAR 4: LIST INPUT FIELD
-    // > ganti field | < kembali | OK edit/konfirmasi
-    // --------------------------------------------------
-    else if (appMode == 4) {
-        int totRow = totalField + 1;
-        if (btn == BTN_RIGHT) {
-            fieldKursor = (fieldKursor + 1) % totRow;
-        } else if (btn == BTN_LEFT) {
-            appMode = 2;
-        } else if (btn == BTN_OK) {
-            if (fieldKursor < totalField) {
-                // Edit field → ke input karakter
-                charIdx    = 0; tLeft = 0;
-                inputAngka = true; // Reset ke mode ANGKA setiap mulai field baru
-                appMode    = 5;
-            } else {
-                // Tombol KONFIRMASI — cek semua field terisi
-                bool ok = true;
-                for (int f = 0; f < totalField; f++)
-                    if (!strlen(field[f].value)) { ok=false; break; }
-                if (ok) {
-                appMode = 6;
-                buildTargetID(); 
-                }
-            }
-        }
     }
 
     // --------------------------------------------------
@@ -753,34 +938,19 @@ void handleStoreInput(int btn) {
     }
 
     // --------------------------------------------------
-    // LAYAR 9: AKSI BAYAR (BAYAR / QRIS)
-    // > toggle | < kembali | OK eksekusi
-    // --------------------------------------------------
-    else if (appMode == 9) {
-        if (btn == BTN_RIGHT) {
-            caraBayar = (caraBayar == 0) ? 1 : 0;
-        } else if (btn == BTN_LEFT) {
-            appMode = 6;
-        } else if (btn == BTN_OK) {
-            if (caraBayar == 1) {
-                appMode = 10; // QRIS -> tampilkan langsung, gak perlu PIN
-            } else {
-                // TF/BAYAR -> wajib PIN dulu, eksekusi sebenarnya baru
-                // jalan setelah PIN benar (lihat appMode 30 di handleJoystick)
-                memset(pinBuf, 0, sizeof(pinBuf));
-                pinPrev = 0;
-                appMode = 30;
-            }
-        }
-    }
-
-    // --------------------------------------------------
     // LAYAR 10: QRIS SCREEN
     // < kembali ke aksi bayar
     // --------------------------------------------------
     else if (appMode == 10) {
         if (btn == BTN_LEFT) appMode = 9;
     }
+
+    // --------------------------------------------------
+    // LAYAR 11: TRX BERHASIL / TIMEOUT / GAGAL (satu layar buat ketiganya,
+    // lihat display_system.c appMode 11 — beda tampilan tergantung
+    // trxberhasil/trxtimeout, bukan appMode terpisah lagi)
+    // < kembali ke home (menu utama) — cuma ini satu-satunya aksi
+    // --------------------------------------------------
     else if (appMode == 11) {
         if (btn == BTN_LEFT) {
             appMode = 0; diSubMenu = false;
@@ -788,27 +958,6 @@ void handleStoreInput(int btn) {
             subKursor = 0; atasMenu = 0;
             trxberhasil = false; checkstatus = false;
             trxtimeout = false;
-        }
-        else if (btn == BTN_RIGHT) {
-            appMode = 12;
-            trxberhasil = false; checkstatus = false;
-            trxtimeout = false;
-        }
-    }
-
-    // --------------------------------------------------
-    // LAYAR 11: TRX BERHASIL
-    // LAYAR 12: TRX GAGAL
-    // < kembali ke home (menu utama)
-    // --------------------------------------------------
-    else if (appMode == 12) {
-        if (btn == BTN_LEFT) {
-            appMode = 0; diSubMenu = false;
-            katKursor = katIdx = 0;
-            subKursor = 0; atasMenu = 0;
-        }
-        else if (btn == BTN_RIGHT) {
-            appMode = 11;
         }
     }
 
