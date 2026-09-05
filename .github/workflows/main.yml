@@ -1,133 +1,63 @@
-name: Build RootX v6.0 Fast
+name: Build TESFMTX Firmware (ESP32-S3)
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches: [ main, master ]
+  workflow_dispatch: {}
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      # --- 1. INSTALL TOOLS UTAMA UBUNTU ---
-      - name: Install System Prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget git flex bison gperf python3-pip python3-setuptools cmake ninja-build ccache libffi-dev libssl-dev dfu-util python3-venv
-
-      # --- 2. CEK CACHE ESP-IDF DI GUDANG (Pake RESTORE) ---
-      - name: Restore ESP-IDF Cache
-        id: cache-restore
-        uses: actions/cache/restore@v4
+      - name: Compile sketch for ESP32-S3
+        uses: arduino/compile-sketches@v1
         with:
-          path: |
-            ~/esp-idf
-            ~/.espressif
-          key: esp-idf-v6.0-${{ runner.os }}-v1
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          platforms: |
+            - name: esp32:esp32
+              source-url: https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          fqbn: "esp32:esp32:esp32s3:JTAGAdapter=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,DebugLevel=none"
+          libraries: |
+            - name: KT0803
+          sketch-paths: |
+            - ./TESFMTX
+          cli-compile-flags: |
+            - --export-binaries
+            - --warnings=none
 
-      # --- 3. DOWNLOAD & INSTALL (Hanya jalan kalau Cache Kosong) ---
-      - name: Clone and Install ESP-IDF
-        if: steps.cache-restore.outputs.cache-hit != 'true'
+      - name: Locate boot_app0.bin (needed to merge a plug-and-play binary)
         run: |
-          git clone -b v6.0 --depth 1 --recursive https://github.com/espressif/esp-idf.git ~/esp-idf
-          ~/esp-idf/install.sh
+          BOOT_APP0=$(find ~/.arduino15/packages/esp32 -name "boot_app0.bin" | head -n 1)
+          echo "BOOT_APP0=$BOOT_APP0" >> "$GITHUB_ENV"
+          echo "Found boot_app0.bin at: $BOOT_APP0"
 
-      # --- 4. PAKSA SIMPAN CACHE SEKARANG JUGA! (Sebelum Compile) ---
-      - name: Save ESP-IDF Cache
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/esp-idf
-            ~/.espressif
-          key: esp-idf-v6.0-${{ runner.os }}-v1
+      - name: Install esptool
+        run: pip install esptool
 
-      # --- 5. PATCHING SOURCE CODE & BUILD FIRMWARE ---
-      - name: Patch gdbstub Source
+      - name: Merge into a single plug-and-play flashable binary
         run: |
-          python3 -c "import os,pathlib; p=pathlib.Path(os.path.expanduser('~/esp-idf'))/'components/esp_gdbstub/src/gdbstub.c'; s=p.read_text(encoding='utf-8'); s=s.replace('#if (CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME || CONFIG_ESP_GDBSTUB_SUPPORT_TASKS)', '#if 1'); p.write_text(s, encoding='utf-8')"
-      - name: Ambil cert & buat header
-        run: |
-          mkdir -p main/include
-          OUT="main/include/server_cert.h"
+          cd TESFMTX/build/esp32.esp32.esp32s3
+          ls -la
+          esptool.py --chip esp32s3 merge_bin \
+            -o ../../../TESFMTX-merged-flash.bin \
+            --flash_mode qio --flash_freq 80m --flash_size 4MB \
+            0x0     TESFMTX.ino.bootloader.bin \
+            0x8000  TESFMTX.ino.partitions.bin \
+            0xe000  "$BOOT_APP0" \
+            0x10000 TESFMTX.ino.bin
 
-          # Daftar domain yang butuh cert: "domain:nama_variabel:url_root_ca"
-          # Root CA beda-beda tergantung siapa yang nerbitin cert-nya (cek
-          # dulu manual pake `openssl s_client -showcerts` terus liat siapa
-          # issuer paling atas, baru cari root-nya di situs resmi CA itu)
-          DOMAINS=(
-            "atlantich2h.com:atlanticcert:http://i.pki.goog/r4.crt"
-            "cek.topupgaming.com:topupgamingcert:https://letsencrypt.org/certs/isrgrootx1.pem"
-          )
-
-          echo '#pragma once' > "$OUT"
-          echo '' >> "$OUT"
-
-          for entry in "${DOMAINS[@]}"; do
-            domain=$(echo "$entry" | cut -d: -f1)
-            varname=$(echo "$entry" | cut -d: -f2)
-            rooturl=$(echo "$entry" | cut -d: -f3-)
-
-            echo "=== Proses $domain -> $varname ==="
-
-            # Ambil leaf + intermediate langsung dari server
-            echo | openssl s_client -connect "$domain:443" -servername "$domain" -showcerts 2>/dev/null \
-              | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' > chain_tmp.pem
-
-            # Ambil root CA — bisa format DER (Google) atau PEM (Let's Encrypt),
-            # coba convert dari DER dulu, kalau gagal berarti udah PEM
-            curl -sL "$rooturl" -o root_tmp.der
-            openssl x509 -inform DER -in root_tmp.der -outform PEM > root_tmp.pem 2>/dev/null \
-              || cp root_tmp.der root_tmp.pem
-
-            cat chain_tmp.pem root_tmp.pem > cert_tmp.pem
-
-            if [ ! -s cert_tmp.pem ]; then
-              echo "❌ Gagal ambil sertifikat buat $domain"
-              exit 1
-            fi
-
-            {
-              echo "const char ${varname}[] ="
-              sed 's/^/"/; s/$/\\n"/' cert_tmp.pem
-              echo ';'
-              echo ''
-            } >> "$OUT"
-
-            rm -f chain_tmp.pem root_tmp.der root_tmp.pem cert_tmp.pem
-          done
-
-          if [ ! -s "$OUT" ]; then
-            echo "❌ server_cert.h kosong, gagal generate"
-            exit 1
-          fi
-
-          cat "$OUT"
-      - name: Build Firmware
-        run: |
-          . ~/esp-idf/export.sh
-
-          python3 -c "import os; p=os.path.expanduser('~/esp-idf/components/esp_wifi/src/wifi_init.c'); \
-          f=open(p,'r').read() if os.path.exists(p) else ''; \
-          open(p,'w').write(f.replace('return ESP_ERR_WIFI_IF;', 'return ESP_OK;')) if f else print('File not found')"
-
-          echo "Patch Selesai, Lanjut Build..."
-
-          if [ -f sdkconfig.defaults ]; then
-            cp sdkconfig.defaults sdkconfig
-          fi
-
-          idf.py fullclean
-          idf.py set-target esp32c3
-          idf.py build
-
-      # --- 6. UPLOAD HASIL JADI .BIN ---
-      - name: Upload Bin
+      - name: Upload full build output (bootloader, partitions, app, elf, map)
         uses: actions/upload-artifact@v4
         with:
-          name: RootX-v6-Firmware
-          path: |
-            build/*.bin
-            build/*/*.bin
+          name: TESFMTX-build-output
+          path: TESFMTX/build/**
+
+      - name: Upload single merged flashable binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: TESFMTX-merged-flash-bin
+          path: TESFMTX-merged-flash.bin
