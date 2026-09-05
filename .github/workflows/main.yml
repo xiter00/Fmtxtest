@@ -20,7 +20,7 @@ jobs:
           platforms: |
             - name: esp32:esp32
               source-url: https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-          fqbn: "esp32:esp32:esp32s3:JTAGAdapter=default,PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,DebugLevel=none"
+          fqbn: "esp32:esp32:esp32s3"
           libraries: |
             - name: KT0803
           sketch-paths: |
@@ -44,7 +44,7 @@ jobs:
           ls -la
           esptool.py --chip esp32s3 merge_bin \
             -o ../../../TESFMTX-merged-flash.bin \
-            --flash_mode qio --flash_freq 80m --flash_size 4MB \
+            --flash_mode keep --flash_freq keep --flash_size keep \
             0x0     TESFMTX.ino.bootloader.bin \
             0x8000  TESFMTX.ino.partitions.bin \
             0xe000  "$BOOT_APP0" \
